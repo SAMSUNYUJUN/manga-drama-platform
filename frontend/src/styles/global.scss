@@ -1,0 +1,301 @@
+@use './variables.scss' as *;
+
+// 全局重置和基础样式
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+// 滚动条样式 - 暗色主题
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-main);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-bg-hover);
+  border-radius: 4px;
+  
+  &:hover {
+    background: var(--color-bg-active);
+  }
+}
+
+body {
+  font-family: var(--font-family-sans);
+  background-color: var(--color-bg-main);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+  font-size: 14px;
+  overflow-x: hidden;
+}
+
+// 链接样式
+a {
+  text-decoration: none;
+  color: var(--color-text-link);
+  transition: color var(--transition-fast);
+
+  &:hover {
+    color: var(--color-text-link-hover);
+  }
+}
+
+// 按钮重置
+button {
+  cursor: pointer;
+  border: none;
+  outline: none;
+  background: none;
+  font-family: inherit;
+  transition: all var(--transition-base);
+  
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+// 输入框和文本域
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  padding: 10px 12px;
+  transition: all var(--transition-fast);
+  
+  &:focus {
+    outline: none;
+    border-color: var(--border-color-focus);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  }
+  
+  &::placeholder {
+    color: var(--color-text-tertiary);
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// 列表
+ul, ol {
+  list-style: none;
+}
+
+// 选中文本样式
+::selection {
+  background-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+// 容器
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 var(--spacing-lg);
+}
+
+// =============== 通用组件样式 ===============
+
+// 按钮系统 - 暗色主题优化
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: 10px 20px;
+  border-radius: var(--border-radius-md);
+  font-weight: var(--font-weight-medium);
+  font-size: 14px;
+  transition: all var(--transition-base);
+  white-space: nowrap;
+  user-select: none;
+
+  // 主要按钮
+  &--primary {
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
+    color: var(--color-text-inverse);
+    box-shadow: var(--shadow-sm);
+    
+    &:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md), var(--glow-primary);
+    }
+    
+    &:active:not(:disabled) {
+      transform: translateY(0);
+    }
+  }
+
+  // 次要按钮
+  &--secondary {
+    background-color: var(--color-bg-elevated);
+    color: var(--color-text-primary);
+    border: 1px solid var(--border-color);
+    
+    &:hover:not(:disabled) {
+      background-color: var(--color-bg-hover);
+      border-color: var(--border-color-light);
+    }
+  }
+
+  // 轮廓按钮
+  &--outline {
+    background: transparent;
+    border: 1px solid var(--border-color-light);
+    color: var(--color-text-primary);
+    
+    &:hover:not(:disabled) {
+      background-color: var(--color-bg-hover);
+      border-color: var(--border-color-hover);
+    }
+  }
+  
+  // 危险按钮
+  &--danger {
+    background-color: var(--color-error);
+    color: white;
+    
+    &:hover:not(:disabled) {
+      background-color: #dc2626;
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+    }
+  }
+  
+  // 文本按钮
+  &--text {
+    background: transparent;
+    color: var(--color-text-secondary);
+    padding: 6px 12px;
+    
+    &:hover:not(:disabled) {
+      color: var(--color-text-primary);
+      background-color: var(--color-bg-hover);
+    }
+  }
+  
+  // 尺寸变体
+  &--sm {
+    padding: 6px 14px;
+    font-size: 13px;
+  }
+  
+  &--lg {
+    padding: 12px 24px;
+    font-size: 16px;
+  }
+}
+
+// 卡片组件
+.card {
+  background-color: var(--color-bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-base);
+  
+  &:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+  
+  &__header {
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--border-color);
+  }
+  
+  &__title {
+    font-size: 18px;
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-primary);
+  }
+  
+  &__body {
+    color: var(--color-text-secondary);
+  }
+}
+
+// 徽章
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  
+  &--primary {
+    background-color: rgba(99, 102, 241, 0.15);
+    color: var(--color-primary-light);
+  }
+  
+  &--success {
+    background-color: rgba(16, 185, 129, 0.15);
+    color: var(--color-success);
+  }
+  
+  &--warning {
+    background-color: rgba(245, 158, 11, 0.15);
+    color: var(--color-warning);
+  }
+  
+  &--error {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: var(--color-error);
+  }
+  
+  &--info {
+    background-color: rgba(59, 130, 246, 0.15);
+    color: var(--color-info);
+  }
+}
+
+// 加载动画
+.loading {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+// 工具类
+.text-primary { color: var(--color-text-primary); }
+.text-secondary { color: var(--color-text-secondary); }
+.text-tertiary { color: var(--color-text-tertiary); }
+.text-muted { color: var(--color-text-muted); }
+
+.bg-main { background-color: var(--color-bg-main); }
+.bg-elevated { background-color: var(--color-bg-elevated); }
+.bg-card { background-color: var(--color-bg-card); }
+
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.gap-sm { gap: var(--spacing-sm); }
+.gap-md { gap: var(--spacing-md); }
+.gap-lg { gap: var(--spacing-lg); }

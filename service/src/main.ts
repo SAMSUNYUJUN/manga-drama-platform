@@ -1,8 +1,44 @@
+import 'tsconfig-paths/register';
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  await app.listen(process.env.PORT ?? 3000);
+  
+  // 启用全局验证管道
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }));
+
+  // 启用CORS
+  app.enableCors({
+    origin: (origin, callback) => {
+      // 允许没有 origin 的请求 (比如移动端或 curl)
+      if (!origin) return callback(null, true);
+      
+      const allowedOrigins = [
+        process.env.FRONTEND_URL,
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+      ].filter(Boolean);
+
+      if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost:')) {
+        callback(null, true);
+      } else {
+        callback(null, true); // 开发环境下允许所有，或者你可以保持限制
+      }
+    },
+    credentials: true,
+  });
+
+  // 设置全局前缀
+  app.setGlobalPrefix('api');
+
+  const port = process.env.PORT || 3001;
+  await app.listen(port);
+  console.log(`🚀 Application is running on: http://localhost:${port}/api`);
 }
 bootstrap();

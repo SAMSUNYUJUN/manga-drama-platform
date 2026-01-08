@@ -174,6 +174,11 @@ ComponentName/
 
 ### 样式规范
 
+**核心要求**: 
+1. **设计风格**: 高端、简约，充满设计感。追求极简主义，利用留白和专业配色提升品质。
+2. **工程质量**: 良好封装，具备极高的可读性和可维护性。
+3. **详细参考**: 请务必参阅 **[docs/frontend/COMPONENT_GUIDE.md](frontend/COMPONENT_GUIDE.md)** 中的 "UI/UX 设计原则" 部分。
+
 **SCSS规范**:
 - 使用BEM命名: .block__element--modifier
 - 嵌套不超过3层

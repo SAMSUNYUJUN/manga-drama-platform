@@ -1,6 +1,6 @@
 /**
  * 任务版本实体
- * @module database/entities
+ * @module database/entities/task-version
  */
 
 import {
@@ -11,19 +11,18 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
-  Index,
 } from 'typeorm';
-import { Task, TaskStage } from './task.entity';
+import { TaskStage } from '@shared/constants';
+import { TaskVersionMetadata } from '@shared/types';
+import { Task } from './task.entity';
 import { Asset } from './asset.entity';
 
 @Entity('task_versions')
-@Index(['taskId', 'version'], { unique: true })
 export class TaskVersion {
   @PrimaryGeneratedColumn()
   id: number;
 
   @Column({ type: 'int' })
-  @Index()
   taskId: number;
 
   @Column({ type: 'int' })
@@ -33,9 +32,9 @@ export class TaskVersion {
   stage: TaskStage;
 
   @Column({ type: 'text', nullable: true })
-  metadata: string; // JSON string
+  metadataJson: string | null;
 
-  @CreateDateColumn({ type: 'datetime' })
+  @CreateDateColumn()
   createdAt: Date;
 
   // 关系
@@ -45,4 +44,13 @@ export class TaskVersion {
 
   @OneToMany(() => Asset, (asset) => asset.version)
   assets: Asset[];
+
+  // 虚拟属性：metadata
+  get metadata(): TaskVersionMetadata | undefined {
+    return this.metadataJson ? JSON.parse(this.metadataJson) : undefined;
+  }
+
+  set metadata(value: TaskVersionMetadata | undefined) {
+    this.metadataJson = value ? JSON.stringify(value) : null;
+  }
 }

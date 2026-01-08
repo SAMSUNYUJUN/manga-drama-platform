@@ -1,0 +1,13 @@
+{
+  "name": "@manga-drama/shared",
+  "version": "1.0.0",
+  "description": "Shared types, constants and utilities for manga-drama platform",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["types", "shared"],
+  "author": "",
+  "license": "MIT"
+}

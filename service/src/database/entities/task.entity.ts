@@ -1,6 +1,6 @@
 /**
  * 任务实体
- * @module database/entities
+ * @module database/entities/task
  */
 
 import {
@@ -12,42 +12,18 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
-  Index,
 } from 'typeorm';
+import { TaskStatus, TaskStage } from '@shared/constants';
 import { User } from './user.entity';
 import { TaskVersion } from './task-version.entity';
 import { Asset } from './asset.entity';
 
-export enum TaskStatus {
-  PENDING = 'PENDING',
-  PROCESSING = 'PROCESSING',
-  PAUSED = 'PAUSED',
-  COMPLETED = 'COMPLETED',
-  FAILED = 'FAILED',
-  CANCELLED = 'CANCELLED',
-}
-
-export enum TaskStage {
-  SCRIPT_UPLOADED = 'SCRIPT_UPLOADED',
-  STORYBOARD_GENERATED = 'STORYBOARD_GENERATED',
-  CHARACTER_DESIGNED = 'CHARACTER_DESIGNED',
-  SCENE_GENERATED = 'SCENE_GENERATED',
-  KEYFRAME_GENERATING = 'KEYFRAME_GENERATING',
-  KEYFRAME_COMPLETED = 'KEYFRAME_COMPLETED',
-  VIDEO_GENERATING = 'VIDEO_GENERATING',
-  VIDEO_COMPLETED = 'VIDEO_COMPLETED',
-  FINAL_COMPOSING = 'FINAL_COMPOSING',
-  COMPLETED = 'COMPLETED',
-}
-
 @Entity('tasks')
-@Index(['userId', 'createdAt'])
 export class Task {
   @PrimaryGeneratedColumn()
   id: number;
 
   @Column({ type: 'int' })
-  @Index()
   userId: number;
 
   @Column({ type: 'varchar', length: 200 })
@@ -57,7 +33,6 @@ export class Task {
   description: string;
 
   @Column({ type: 'varchar', length: 20, default: TaskStatus.PENDING })
-  @Index()
   status: TaskStatus;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
@@ -66,11 +41,10 @@ export class Task {
   @Column({ type: 'int', nullable: true })
   currentVersionId: number;
 
-  @CreateDateColumn({ type: 'datetime' })
-  @Index()
+  @CreateDateColumn()
   createdAt: Date;
 
-  @UpdateDateColumn({ type: 'datetime' })
+  @UpdateDateColumn()
   updatedAt: Date;
 
   // 关系

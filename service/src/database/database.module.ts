@@ -16,8 +16,8 @@ import { User, Task, TaskVersion, Asset } from './entities';
         type: 'sqlite',
         database: configService.get<string>('DATABASE_PATH', './database.sqlite'),
         entities: [User, Task, TaskVersion, Asset],
-        synchronize: configService.get<string>('NODE_ENV') === 'development',
-        logging: configService.get<string>('NODE_ENV') === 'development',
+        synchronize: true, // 开发环境自动同步数据库结构
+        logging: true,
       }),
       inject: [ConfigService],
     }),

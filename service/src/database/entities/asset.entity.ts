@@ -1,6 +1,6 @@
 /**
  * 资产实体
- * @module database/entities
+ * @module database/entities/asset
  */
 
 import {
@@ -10,37 +10,24 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
-  Index,
 } from 'typeorm';
+import { AssetType } from '@shared/constants';
+import { AssetMetadata } from '@shared/types';
 import { Task } from './task.entity';
 import { TaskVersion } from './task-version.entity';
 
-export enum AssetType {
-  ORIGINAL_SCRIPT = 'original_script',
-  STORYBOARD_SCRIPT = 'storyboard_script',
-  CHARACTER_DESIGN = 'character_design',
-  SCENE_IMAGE = 'scene_image',
-  KEYFRAME_IMAGE = 'keyframe_image',
-  STORYBOARD_VIDEO = 'storyboard_video',
-  FINAL_VIDEO = 'final_video',
-}
-
 @Entity('assets')
-@Index(['taskId', 'type'])
-@Index(['versionId'])
 export class Asset {
   @PrimaryGeneratedColumn()
   id: number;
 
   @Column({ type: 'int' })
-  @Index()
   taskId: number;
 
   @Column({ type: 'int', nullable: true })
   versionId: number;
 
   @Column({ type: 'varchar', length: 50 })
-  @Index()
   type: AssetType;
 
   @Column({ type: 'varchar', length: 500 })
@@ -56,10 +43,9 @@ export class Asset {
   mimeType: string;
 
   @Column({ type: 'text', nullable: true })
-  metadata: string; // JSON string
+  metadataJson: string | null;
 
-  @CreateDateColumn({ type: 'datetime' })
-  @Index()
+  @CreateDateColumn()
   createdAt: Date;
 
   // 关系
@@ -73,4 +59,13 @@ export class Asset {
   })
   @JoinColumn({ name: 'versionId' })
   version: TaskVersion;
+
+  // 虚拟属性：metadata
+  get metadata(): AssetMetadata | undefined {
+    return this.metadataJson ? JSON.parse(this.metadataJson) : undefined;
+  }
+
+  set metadata(value: AssetMetadata | undefined) {
+    this.metadataJson = value ? JSON.stringify(value) : null;
+  }
 }

@@ -1,0 +1,108 @@
+/**
+ * 主布局样式 - 暗色主题 (CSS Modules)
+ * 设计理念：采用分层背景色创造深度感，主内容区使用微妙的渐变增加视觉层次
+ */
+
+.mainLayout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-base);
+}
+
+.layoutBody {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.content {
+  flex: 1;
+  padding: var(--spacing-xl);
+  background: var(--color-bg-main);
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  
+  // 添加微妙的渐变背景
+  &::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 50%;
+    height: 50%;
+    background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.05) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  
+  &::after {
+    content: '';
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 50%;
+    height: 50%;
+    background: radial-gradient(circle at bottom left, rgba(124, 58, 237, 0.05) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  
+  // 确保内容在渐变之上
+  > * {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+.pageHeader {
+  margin-bottom: var(--spacing-xl);
+}
+
+.pageTitle {
+  font-size: 32px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--spacing-sm);
+  letter-spacing: -0.5px;
+}
+
+.pageDescription {
+  font-size: 16px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.pageBreadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 14px;
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--spacing-md);
+}
+
+.breadcrumbItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  
+  &:not(:last-child)::after {
+    content: '/';
+    color: var(--color-text-muted);
+  }
+  
+  a {
+    color: var(--color-text-secondary);
+    
+    &:hover {
+      color: var(--color-primary-light);
+    }
+  }
+  
+  &.active {
+    color: var(--color-text-primary);
+  }
+}

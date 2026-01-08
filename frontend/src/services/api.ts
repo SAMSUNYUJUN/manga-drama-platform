@@ -1,0 +1,63 @@
+/**
+ * Axios实例配置
+ * @module services/api
+ */
+
+import axios, { AxiosError } from 'axios';
+import type { ApiResponse } from '@shared/types/api.types';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+
+// 创建axios实例
+export const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// 请求拦截器：添加token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// 响应拦截器：统一错误处理
+api.interceptors.response.use(
+  (response) => {
+    return response;
+  },
+  (error: AxiosError<ApiResponse>) => {
+    if (error.response) {
+      const { status, data } = error.response;
+
+      // 401: 未认证，跳转到登录页
+      if (status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+      }
+
+      // 返回错误消息
+      const message = data?.message || data?.error?.message || 'An error occurred';
+      return Promise.reject(new Error(message));
+    }
+
+    if (error.request) {
+      return Promise.reject(new Error('Network error. Please check your connection.'));
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+export default api;

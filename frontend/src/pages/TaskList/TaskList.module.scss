@@ -1,0 +1,176 @@
+/**
+ * 任务列表样式 - 暗色主题 (CSS Modules)
+ * 设计理念：卡片式布局，通过边框和阴影创造层次感
+ * 状态徽章使用半透明背景，与暗色主题完美融合
+ */
+
+.taskList {
+  animation: fadeIn 0.4s ease-out;
+}
+
+.pageHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-xl);
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+
+  h1 {
+    font-size: 32px;
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-primary);
+    margin: 0;
+    letter-spacing: -0.5px;
+  }
+}
+
+.btnPrimary {
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
+  color: white;
+  text-decoration: none;
+  border-radius: var(--border-radius-md);
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  transition: all var(--transition-base);
+  box-shadow: var(--shadow-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md), var(--glow-primary);
+  }
+}
+
+.loading {
+  text-align: center;
+  padding: var(--spacing-3xl);
+  font-size: 16px;
+  color: var(--color-text-secondary);
+}
+
+.emptyState {
+  text-align: center;
+  padding: var(--spacing-3xl);
+  background: var(--color-bg-card);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--border-radius-lg);
+  
+  p {
+    font-size: 16px;
+    color: var(--color-text-tertiary);
+  }
+}
+
+.tasksGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--spacing-lg);
+}
+
+.taskCard {
+  background: var(--color-bg-card);
+  padding: var(--spacing-xl);
+  border-radius: var(--border-radius-lg);
+  border: 1px solid var(--border-color);
+  text-decoration: none;
+  color: inherit;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-base);
+  position: relative;
+  overflow: hidden;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
+    opacity: 0;
+    transition: opacity var(--transition-base);
+  }
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--border-color-light);
+    
+    &::before {
+      opacity: 1;
+    }
+  }
+  
+  h3 {
+    font-size: 18px;
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--spacing-sm);
+    color: var(--color-text-primary);
+  }
+}
+
+.taskDesc {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-color);
+}
+
+.status {
+  padding: 6px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+
+  &.statusPending {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--color-warning);
+  }
+
+  &.statusProcessing {
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--color-info);
+  }
+
+  &.statusCompleted {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--color-success);
+  }
+  
+  &.statusFailed {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--color-error);
+  }
+}
+
+.date {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
