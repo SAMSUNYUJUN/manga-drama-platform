@@ -1,0 +1,32 @@
+{
+  "name": "manga-drama-platform",
+  "version": "1.0.0",
+  "description": "AI-powered manga drama production platform",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "install-all": "npm install && cd service && npm install && cd ../frontend && npm install",
+    "dev": "node -e \"require('child_process').exec(process.platform === 'win32' ? 'powershell .\\\\scripts\\\\deploy.ps1 dev' : 'bash ./scripts/deploy.sh dev')\"",
+    "build": "cd service && npm run build && cd ../frontend && npm run build",
+    "prod": "pm2 start ecosystem.config.js",
+    "stop": "pm2 stop manga-drama-backend manga-drama-frontend",
+    "restart": "pm2 restart manga-drama-backend manga-drama-frontend",
+    "logs": "pm2 logs",
+    "status": "pm2 list"
+  },
+  "keywords": [
+    "manga",
+    "drama",
+    "ai",
+    "generation",
+    "video"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  }
+}
