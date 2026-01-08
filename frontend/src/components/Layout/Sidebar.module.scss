@@ -10,7 +10,10 @@
   border-right: 1px solid var(--border-color);
   padding: var(--spacing-lg) 0;
   overflow-y: auto;
-  height: 100%;
+  height: calc(100vh - 64px); // 直接使用视口高度减去导航栏
+  flex-shrink: 0; // 防止侧边栏被压缩
+  position: sticky;
+  top: 0;
 }
 
 .sidebarSection {
