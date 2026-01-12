@@ -47,6 +47,12 @@ export const TaskDetail = () => {
           ← 返回列表
         </button>
         <h1>{task.title}</h1>
+        <button
+          onClick={() => navigate(`/tasks/${task.id}/workflow`)}
+          className={styles.btnPrimary}
+        >
+          打开工作流
+        </button>
       </div>
 
       <div className={styles.detailContent}>

@@ -31,6 +31,12 @@ export class TaskVersion {
   @Column({ type: 'varchar', length: 50 })
   stage: TaskStage;
 
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  lockedBy: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  lockedAt: Date | null;
+
   @Column({ type: 'text', nullable: true })
   metadataJson: string | null;
 

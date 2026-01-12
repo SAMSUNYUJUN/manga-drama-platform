@@ -52,7 +52,7 @@
 **后端**: NestJS + TypeScript + TypeORM  
 **数据库**: SQLite  
 **存储**: 阿里云OSS  
-**AI服务**: 即梦API(生图) + Sora API(生视频) + LLM API(剧本解析)  
+**AI服务**: OpenAI-compatible 网关（LLM/图像/视频统一接入）  
 **认证**: JWT Token
 
 ## 项目目录结构
@@ -83,6 +83,6 @@ manga-drama-platform/
 | API接口定义 | API_DESIGN.md |
 | 前端路由和页面 | frontend/COMPONENT_GUIDE.md |
 | 后端模块职责 | backend/MODULE_STRUCTURE.md |
-| 即梦/Sora API | AI_SERVICES.md |
+| OpenAI-Compatible 网关 | AI_SERVICES.md |
 | 文件存储方案 | STORAGE_GUIDE.md |
 | 代码规范 | DEVELOPMENT_GUIDE.md |

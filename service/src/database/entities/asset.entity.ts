@@ -8,10 +8,11 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
-import { AssetType } from '@shared/constants';
+import { AssetStatus, AssetType } from '@shared/constants';
 import { AssetMetadata } from '@shared/types';
 import { Task } from './task.entity';
 import { TaskVersion } from './task-version.entity';
@@ -30,6 +31,9 @@ export class Asset {
   @Column({ type: 'varchar', length: 50 })
   type: AssetType;
 
+  @Column({ type: 'varchar', length: 20, default: AssetStatus.ACTIVE })
+  status: AssetStatus;
+
   @Column({ type: 'varchar', length: 500 })
   url: string;
 
@@ -45,8 +49,17 @@ export class Asset {
   @Column({ type: 'text', nullable: true })
   metadataJson: string | null;
 
+  @Column({ type: 'int', nullable: true })
+  replacedById: number | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  trashedAt: Date | null;
+
   @CreateDateColumn()
   createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 
   // 关系
   @ManyToOne(() => Task, (task) => task.assets, { onDelete: 'CASCADE' })

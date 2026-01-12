@@ -2,9 +2,12 @@ import 'tsconfig-paths/register';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import * as path from 'path';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   
   // 启用全局验证管道
   app.useGlobalPipes(new ValidationPipe({
@@ -12,6 +15,12 @@ async function bootstrap() {
     forbidNonWhitelisted: true,
     transform: true,
   }));
+  app.useGlobalFilters(new HttpExceptionFilter());
+
+  const localStoragePath = process.env.LOCAL_STORAGE_PATH || '../storage/uploads';
+  app.useStaticAssets(path.resolve(process.cwd(), localStoragePath), {
+    prefix: '/uploads',
+  });
 
   // 启用CORS
   app.enableCors({

@@ -51,3 +51,75 @@ export enum AssetType {
   STORYBOARD_VIDEO = 'storyboard_video',
   FINAL_VIDEO = 'final_video',
 }
+
+/**
+ * 资产状态枚举
+ */
+export enum AssetStatus {
+  ACTIVE = 'ACTIVE',
+  REJECTED = 'REJECTED',
+  TRASHED = 'TRASHED',
+  REPLACED = 'REPLACED',
+}
+
+/**
+ * 工作流节点类型枚举
+ */
+export enum WorkflowNodeType {
+  START = 'START',
+  END = 'END',
+  LLM_TOOL = 'LLM_TOOL',
+  LLM_PARSE_SCRIPT = 'LLM_PARSE_SCRIPT',
+  GENERATE_STORYBOARD = 'GENERATE_STORYBOARD',
+  GENERATE_CHARACTER_IMAGES = 'GENERATE_CHARACTER_IMAGES',
+  HUMAN_REVIEW_ASSETS = 'HUMAN_REVIEW_ASSETS',
+  HUMAN_BREAKPOINT = 'HUMAN_BREAKPOINT',
+  GENERATE_SCENE_IMAGE = 'GENERATE_SCENE_IMAGE',
+  GENERATE_KEYFRAMES = 'GENERATE_KEYFRAMES',
+  GENERATE_VIDEO = 'GENERATE_VIDEO',
+  FINAL_COMPOSE = 'FINAL_COMPOSE',
+}
+
+/**
+ * 工作流运行状态
+ */
+export enum WorkflowRunStatus {
+  PENDING = 'PENDING',
+  RUNNING = 'RUNNING',
+  PAUSED = 'PAUSED',
+  WAITING_HUMAN = 'WAITING_HUMAN',
+  SUCCEEDED = 'SUCCEEDED',
+  FAILED = 'FAILED',
+  CANCELLED = 'CANCELLED',
+}
+
+/**
+ * 节点运行状态
+ */
+export enum NodeRunStatus {
+  PENDING = 'PENDING',
+  RUNNING = 'RUNNING',
+  PAUSED = 'PAUSED',
+  WAITING_HUMAN = 'WAITING_HUMAN',
+  SUCCEEDED = 'SUCCEEDED',
+  FAILED = 'FAILED',
+  CANCELLED = 'CANCELLED',
+}
+
+/**
+ * 人工审核决策
+ */
+export enum HumanReviewDecision {
+  APPROVE = 'APPROVE',
+  REJECT = 'REJECT',
+  REPLACE = 'REPLACE',
+}
+
+/**
+ * Provider 类型
+ */
+export enum ProviderType {
+  LLM = 'LLM',
+  IMAGE = 'IMAGE',
+  VIDEO = 'VIDEO',
+}

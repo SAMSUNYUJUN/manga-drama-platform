@@ -10,6 +10,9 @@
 
 .detailHeader {
   margin-bottom: var(--spacing-xl);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
 }
 
 .btnBack {
@@ -38,6 +41,15 @@
     margin: 0;
     letter-spacing: -0.5px;
   }
+}
+
+.btnPrimary {
+  padding: 10px 18px;
+  border-radius: var(--border-radius-md);
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
+  color: var(--color-text-inverse);
+  font-weight: var(--font-weight-medium);
+  box-shadow: var(--shadow-sm);
 }
 
 .loading, .error {

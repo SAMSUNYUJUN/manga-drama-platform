@@ -1,5 +1,52 @@
 # 变更记录
 
+## [2026-01-13] - 工作流强类型变量系统与断点增强
+
+### ✨ 新增功能
+
+- ✅ Start/End 节点自动补齐与不可删除
+- ✅ 节点 inputs/outputs 变量系统与类型约束连线
+- ✅ 工作流 validate 接口（保存/运行前校验）
+- ✅ HUMAN_BREAKPOINT 节点与 human-select 行为
+- ✅ TrashAsset 记录与 24h 自动清理
+- ✅ 节点测试与工作流测试入口
+
+### 🧪 测试
+
+- 添加校验服务单元测试
+- 添加 human breakpoint 暂停/恢复集成测试
+
+### 📝 文档更新
+
+- 更新 ARCHITECTURE.md（变量系统与节点类型）
+- 更新 API_DESIGN.md（新增接口）
+- 更新 DATABASE_DESIGN.md（TrashAsset 表）
+
+## [2026-01-12] - 工作流与AI配置基础落地
+
+### ✨ 新增功能
+
+- ✅ 工作流模板与版本（WorkflowTemplate/Version）
+- ✅ 工作流执行与节点运行持久化（WorkflowRun/NodeRun）
+- ✅ 人工断点审核与可追溯决策（HumanReviewDecision）
+- ✅ Prompt 模板与版本管理（PromptTemplate/Version）
+- ✅ Provider + 全局配置后台管理（Admin）
+- ✅ 资产生命周期（ACTIVE/REJECTED/TRASHED/REPLACED）
+- ✅ Script 上传与解析新接口
+- ✅ AI Mock/Live 编排与多策略输出解析
+- ✅ 任务版本锁并发控制
+
+### 🧪 测试
+
+- 添加并发锁单元测试
+- 添加 Live AI 冒烟测试（可跳过）
+
+### 📝 文档更新
+
+- 更新 ARCHITECTURE.md（工作流映射）
+- 更新 API_DESIGN.md（新增接口）
+- 更新 summarize.md 作为初始化说明
+
 ## [2026-01-08] - 骨架优先开发完成
 
 ### ✨ 新增功能

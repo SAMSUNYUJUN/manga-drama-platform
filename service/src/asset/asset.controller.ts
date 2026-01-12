@@ -7,6 +7,7 @@ import {
   Controller,
   Get,
   Delete,
+  Post,
   Param,
   Query,
   ParseIntPipe,
@@ -65,13 +66,65 @@ export class AssetController {
   @Delete(':id')
   async remove(
     @Param('id', ParseIntPipe) id: number,
+    @Query('confirmToken') confirmToken: string | undefined,
     @CurrentUser() user: User,
   ): Promise<ApiResponse<null>> {
-    await this.assetService.remove(id, user);
+    await this.assetService.hardDelete(id, confirmToken, user);
     return {
       success: true,
       data: null,
-      message: 'Asset deleted successfully',
+      message: 'Asset hard deleted successfully',
+    };
+  }
+
+  /**
+   * 下载资产
+   * GET /api/assets/:id/download
+   */
+  @Get(':id/download')
+  async download(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<{ url: string }>> {
+    const asset = await this.assetService.findOne(id, user);
+    return {
+      success: true,
+      data: { url: asset.url },
+      message: 'Asset download url ready',
+    };
+  }
+
+  /**
+   * 资产加入垃圾桶
+   * POST /api/assets/:id/trash
+   */
+  @Post(':id/trash')
+  async trash(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<Asset>> {
+    const data = await this.assetService.trash(id, user);
+    return {
+      success: true,
+      data,
+      message: 'Asset trashed successfully',
+    };
+  }
+
+  /**
+   * 恢复资产
+   * POST /api/assets/:id/restore
+   */
+  @Post(':id/restore')
+  async restore(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<Asset>> {
+    const data = await this.assetService.restore(id, user);
+    return {
+      success: true,
+      data,
+      message: 'Asset restored successfully',
     };
   }
 }

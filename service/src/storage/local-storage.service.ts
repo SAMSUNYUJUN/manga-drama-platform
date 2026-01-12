@@ -17,7 +17,8 @@ export class LocalStorageService implements IStorageService {
   private readonly baseUrl: string;
 
   constructor(private configService: ConfigService) {
-    this.uploadDir = this.configService.get<string>('LOCAL_STORAGE_PATH') || './storage/uploads';
+    const configuredPath = this.configService.get<string>('LOCAL_STORAGE_PATH') || '../storage/uploads';
+    this.uploadDir = path.resolve(process.cwd(), configuredPath);
     this.baseUrl = this.configService.get<string>('LOCAL_STORAGE_URL') || 'http://localhost:3001/uploads';
     fs.ensureDirSync(this.uploadDir);
   }

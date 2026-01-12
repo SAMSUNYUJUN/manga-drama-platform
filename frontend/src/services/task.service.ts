@@ -36,6 +36,30 @@ export const getTask = async (id: number): Promise<TaskDetail> => {
 };
 
 /**
+ * 获取任务版本列表
+ */
+export const getTaskVersions = async (taskId: number) => {
+  const response = await api.get<ApiResponse<any>>(`/tasks/${taskId}/versions`);
+  return response.data.data || [];
+};
+
+/**
+ * 获取任务版本详情
+ */
+export const getTaskVersion = async (taskId: number, versionId: number) => {
+  const response = await api.get<ApiResponse<any>>(`/tasks/${taskId}/versions/${versionId}`);
+  return response.data.data!;
+};
+
+/**
+ * 创建任务版本
+ */
+export const createTaskVersion = async (taskId: number, payload?: any) => {
+  const response = await api.post<ApiResponse<any>>(`/tasks/${taskId}/versions`, payload || {});
+  return response.data.data!;
+};
+
+/**
  * 更新任务
  */
 export const updateTask = async (id: number, data: UpdateTaskDto): Promise<Task> => {

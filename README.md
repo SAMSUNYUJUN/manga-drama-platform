@@ -12,6 +12,9 @@ AI驱动的漫剧生产平台，支持从剧本到视频的完整制作流程。
 4. **关键帧生成** - 批量生成分镜关键帧，支持单个重试
 5. **视频生成** - 关键帧转视频，支持单个重试
 6. **资产管理** - 完整的资产管理和版本控制
+7. **低代码工作流** - 拖拽编排 + 人工断点
+8. **Prompt管理** - 版本化 + 变量渲染
+9. **Provider配置** - 可配置模型与API Key
 
 ## 技术栈
 
@@ -28,9 +31,8 @@ AI驱动的漫剧生产平台，支持从剧本到视频的完整制作流程。
 - JWT认证
 
 ### AI服务
-- 即梦API (图片生成)
-- Sora API (视频生成)
-- LLM API (剧本解析)
+- OpenAI-compatible 网关（LLM/图像/视频统一接入，默认 Aisonnet）
+- 兼容保留：Jimeng/Sora/LLM 直连模块（可选启用）
 
 ### 存储
 - 阿里云OSS (生产)
@@ -59,11 +61,10 @@ npm run install-all
 ```bash
 # 必需配置
 JWT_SECRET=your-jwt-secret
-OSS_ACCESS_KEY_ID=your-oss-key
-OSS_ACCESS_KEY_SECRET=your-oss-secret
-JIMENG_API_KEY=your-jimeng-key
-SORA_API_KEY=your-sora-key
-LLM_API_KEY=your-llm-key
+
+# AI 网关配置（LIVE 模式）
+AI_GATEWAY_BASE_URL=https://newapi.aisonnet.org/v1
+AI_GATEWAY_API_KEY=sk-REPLACE_ME
 ```
 
 #### 前端配置（可选）
@@ -86,6 +87,10 @@ LLM_API_KEY=your-llm-key
 - 前端: http://localhost:5173
 - 后端: http://localhost:3001
 
+默认管理员账号（Seed）：
+- username: admin
+- password: admin123
+
 ### 生产环境
 
 **构建项目:**
@@ -101,6 +106,24 @@ npm run prod
 访问：
 - 前端: http://localhost:3003
 - 后端: http://localhost:3002
+
+## 测试
+
+```bash
+npm run test
+LIVE_AI_TESTS=true npm run test:live
+```
+
+## 工作流编辑与测试
+
+- 进入 `/workflows/:id/editor` 打开可视化编辑器，Start/End 节点自动存在且不可删除
+- 通过“变量编辑器”配置节点 inputs/outputs（name/type/required/default）
+- 连线时会进行类型检查，不匹配会提示并拒绝连接
+- 点击“校验工作流/保存版本”时会执行后端校验（type mismatch / missing input / cycle 等）
+- 人工断点节点（HUMAN_BREAKPOINT）执行时会暂停，执行面板可选择候选并继续
+- Trash 中的资产默认保留 24h，后端定时清理
+- 节点测试：在编辑器右侧 “节点测试” 面板填写 inputs 并运行
+- 工作流测试：在任务执行面板填写 Start inputs 后启动运行
 
 ## 项目结构
 
@@ -121,7 +144,9 @@ manga-drama-platform/
 │   │   ├── task/         # 任务模块
 │   │   ├── asset/        # 资产模块
 │   │   ├── script/       # 剧本处理
-│   │   ├── generation/   # AI生成
+│   │   ├── workflow/     # 低代码工作流
+│   │   ├── prompt/       # Prompt模板
+│   │   ├── admin/        # Provider/全局配置
 │   │   ├── storage/      # 文件存储
 │   │   ├── ai-service/   # AI服务封装
 │   │   ├── common/       # 通用模块

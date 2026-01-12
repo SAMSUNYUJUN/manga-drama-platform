@@ -4,14 +4,37 @@
 
 | 服务 | 用途 | API提供商 | 调用场景 |
 |-----|------|---------|---------|
-| 即梦API | 图片生成 | 即梦 | 角色定妆、场景图、关键帧 |
-| Sora API | 视频生成 | OpenAI/代理 | 关键帧转视频 |
-| LLM API | 文本处理 | GPT-4/Claude | 剧本解析、分镜脚本生成 |
+| OpenAI-Compatible Gateway | 统一 LLM / Image / Video | Aisonnet | 全流程默认调用 |
+| 即梦API (legacy) | 图片生成 | 即梦 | 兼容保留 |
+| Sora API (legacy) | 视频生成 | OpenAI/代理 | 兼容保留 |
+| LLM API (legacy) | 文本处理 | GPT-4/Claude | 兼容保留 |
+
+> 说明：summarize.md 中提到的 Jimeng/Sora/LLM 仍保留接口形式，但默认由 OpenAI-Compatible 网关统一调度，避免多套协议维护成本。
+
+## OpenAI-Compatible 网关（Live）
+
+为了支持统一的模型路由和多模态输出解析，系统内置 **OpenAI-Compatible Provider**：
+
+- 环境变量：`AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY`
+- 模式：`AI_MODE=mock|live`
+- Live 冒烟测试开关：`LIVE_AI_TESTS`, `LIVE_VIDEO_TESTS`
+- 默认模型：`LLM_MODEL`, `IMAGE_MODEL`, `VIDEO_MODEL`
+
+### 多策略输出解析（图像/视频）
+
+按以下优先级解析（命中即停）：
+1. `response.data.data[0].url` / `b64_json`
+2. `chat.completions` 内容中的 JSON（image_url / video_url / images）
+3. Markdown 链接或纯 URL
+4. base64 data URI
 
 ## 模块位置
 
 ```
 service/src/ai-service/
+├── providers/
+│   └── openai-compatible.provider.ts
+├── orchestrator.service.ts
 ├── jimeng/
 │   ├── jimeng.service.ts
 │   ├── jimeng.types.ts
@@ -28,6 +51,8 @@ service/src/ai-service/
 ```
 
 ## 统一接口设计
+
+平台主流程通过 AiOrchestratorService 调度，统一返回文本与媒体资产结果；下述接口为 legacy 直连形态。
 
 ### IImageGenerationService
 

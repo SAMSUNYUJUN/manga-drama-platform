@@ -40,13 +40,12 @@
 └──┬──────┬──────┬────┘
    │      │      │
    ↓      ↓      ↓
-┌─────┐ ┌────┐ ┌──────────┐
-│SQLite│ │OSS │ │AI Services│
-└─────┘ └────┘ └──────────┘
+┌─────┐ ┌────┐ ┌──────────────────────┐
+│SQLite│ │OSS │ │OpenAI-Compatible AI │
+└─────┘ └────┘ └──────────────────────┘
                 │
-                ├─ 即梦API (图片)
-                ├─ Sora API (视频)
-                └─ LLM API (剧本解析)
+                ├─ LLM / Image / Video (Aisonnet)
+                └─ Legacy: Jimeng/Sora (optional)
 ```
 
 ## 后端模块设计
@@ -60,9 +59,12 @@
 | TaskModule | src/task/ | 任务生命周期管理、状态流转 |
 | AssetModule | src/asset/ | 资产CRUD、查询过滤 |
 | ScriptModule | src/script/ | 剧本上传、解析调度 |
-| GenerationModule | src/generation/ | 图片/视频生成调度 |
+| GenerationModule (legacy) | src/generation/ | 旧生成调度占位（已由 WorkflowModule 接管） |
 | StorageModule | src/storage/ | 文件存储抽象层 |
 | AIServiceModule | src/ai-service/ | AI服务封装 |
+| WorkflowModule | src/workflow/ | 低代码工作流编排与执行 |
+| PromptModule | src/prompt/ | Prompt模板与版本管理 |
+| AdminModule | src/admin/ | Provider与全局配置管理 |
 | ConfigModule | src/config/ | 环境变量配置 |
 | CommonModule | src/common/ | 通用工具、装饰器、过滤器 |
 
@@ -83,7 +85,15 @@ AppModule
 │  ├─ TaskModule
 │  ├─ AssetModule
 │  └─ AIServiceModule
-├─ GenerationModule
+├─ PromptModule
+├─ AdminModule
+├─ WorkflowModule
+│  ├─ TaskModule
+│  ├─ AssetModule
+│  ├─ PromptModule
+│  ├─ StorageModule
+│  └─ AIServiceModule
+├─ GenerationModule (legacy)
 │  ├─ TaskModule
 │  ├─ AssetModule
 │  ├─ StorageModule
@@ -125,35 +135,27 @@ AppModule
 - createNewVersion(): 创建新版本
 - switchVersion(): 切换活跃版本
 
-#### GenerationModule
+#### GenerationModule（Legacy）
 
-**职责**: 协调AI生成流程
+**职责**: 旧式生成调度（保留兼容，主流程改由 WorkflowModule 编排）
 
-**子模块**:
-- ImageGeneration: 图片生成调度
-- VideoGeneration: 视频生成调度
-- StoryboardGeneration: 分镜脚本生成
-
-**流程**:
-1. 接收生成请求
-2. 调用AIServiceModule
-3. 轮询/Webhook获取结果
-4. 保存到StorageModule
-5. 创建Asset记录
+**说明**:
+- 新的线性 TaskStage + 低代码编排全部由 WorkflowRun/NodeRun 驱动
+- GenerationModule 可以作为直连 Provider 的备用实现
 
 #### AIServiceModule
 
-**职责**: 封装AI服务API
+**职责**: 封装AI服务API（OpenAI-compatible 为主）
 
 **子模块**:
-- JimengService: 即梦API封装
-- SoraService: Sora API封装
-- LLMService: LLM API封装
+- AiOrchestratorService: 统一编排 LLM / Image / Video，支持 Mock + Live
+- OpenAICompatibleProvider: OpenAI-compatible chat/completions 接入
+- JimengService / SoraService / LLMService: 兼容保留的直连服务（可选）
 
 **设计原则**:
-- 统一接口：所有服务实现相同接口
+- 统一接口：LLM/图像/视频均走编排层统一出参
 - 错误处理：统一的错误捕获和重试
-- 状态追踪：记录请求ID和状态
+- 输出解析：多策略解析 URL / base64 / Markdown 链接
 
 #### StorageModule
 
@@ -172,6 +174,67 @@ IStorageService {
 **实现类**:
 - OSSStorageService: 阿里云OSS实现
 - LocalStorageService: 本地文件系统实现（开发用）
+
+## 工作流引擎（Workflow）
+
+### 模块职责
+
+- **WorkflowTemplate/Version**: 保存拖拽节点与连线配置，支持版本化
+- **WorkflowRun/NodeRun**: 全流程执行记录，支持恢复与重试
+- **HumanReviewDecision**: 人工断点的可追溯记录
+- **TrashAsset**: 人工断点丢弃资产的垃圾桶记录，支持 24h 自动清理
+
+### 变量系统与类型校验
+
+- 节点包含 inputs/outputs 变量定义（name/key/type/required/defaultValue）
+- Edge 保存 sourceOutputKey → targetInputKey 映射关系，支持 transform（stringify/parse_json）
+- 类型校验触发点：连线时前端即时校验、保存时后端校验、运行前后端校验
+- 默认类型集合：text / number / boolean / json / asset_ref / list<T>
+
+### Start / End 节点
+
+- Start/End 节点在画布中默认存在且不可删除
+- Start 仅允许出边，End 仅允许入边
+- 旧版本数据缺失时，读取与运行时会自动补齐
+
+### 工作流节点类型（最低实现）
+
+0. START
+1. LLM_PARSE_SCRIPT
+2. GENERATE_STORYBOARD
+3. GENERATE_CHARACTER_IMAGES
+4. HUMAN_REVIEW_ASSETS
+5. HUMAN_BREAKPOINT
+6. GENERATE_SCENE_IMAGE
+7. GENERATE_KEYFRAMES
+8. GENERATE_VIDEO
+9. FINAL_COMPOSE
+10. END
+
+### TaskStage 与 Workflow Node 映射
+
+> 规则：同一 Stage 对应的节点全部完成才推进；Stage 不回退。
+
+| TaskStage | 触发节点 |
+| --- | --- |
+| SCRIPT_UPLOADED | LLM_PARSE_SCRIPT |
+| STORYBOARD_GENERATED | LLM_PARSE_SCRIPT, GENERATE_STORYBOARD |
+| CHARACTER_DESIGNED | GENERATE_CHARACTER_IMAGES, HUMAN_REVIEW_ASSETS |
+| SCENE_GENERATED | GENERATE_SCENE_IMAGE |
+| KEYFRAME_GENERATING | GENERATE_KEYFRAMES |
+| KEYFRAME_COMPLETED | GENERATE_KEYFRAMES |
+| VIDEO_GENERATING | GENERATE_VIDEO |
+| VIDEO_COMPLETED | GENERATE_VIDEO |
+| FINAL_COMPOSING | FINAL_COMPOSE |
+| COMPLETED | FINAL_COMPOSE |
+
+> KEYFRAME_GENERATING / VIDEO_GENERATING 在节点开始执行时写入；完成后进入对应 COMPLETED 阶段。
+
+### 并发锁策略
+
+- TaskVersion 加锁字段：lockedBy / lockedAt
+- 同一 taskVersion 同时仅允许一个 WorkflowRun 处于 RUNNING/WAITING_HUMAN
+- 失败或取消时释放锁
 
 ## 前端架构设计
 

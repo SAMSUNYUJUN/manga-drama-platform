@@ -11,7 +11,10 @@
 | TaskModule | src/task/ | 任务管理、版本控制 |
 | AssetModule | src/asset/ | 资产管理 |
 | ScriptModule | src/script/ | 剧本处理 |
-| GenerationModule | src/generation/ | AI生成调度 |
+| WorkflowModule | src/workflow/ | 低代码工作流编排 |
+| PromptModule | src/prompt/ | Prompt 模板与版本 |
+| AdminModule | src/admin/ | Provider/全局配置 |
+| GenerationModule (legacy) | src/generation/ | AI生成调度（兼容保留） |
 
 ### 支撑模块
 

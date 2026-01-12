@@ -59,4 +59,19 @@ export class AuthController {
       message: 'Profile retrieved successfully',
     };
   }
+
+  /**
+   * 获取当前用户信息
+   * GET /api/auth/me
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  async getMe(@CurrentUser() user: User): Promise<ApiResponse<User>> {
+    const data = await this.authService.getProfile(user.id);
+    return {
+      success: true,
+      data,
+      message: 'Profile retrieved successfully',
+    };
+  }
 }

@@ -15,6 +15,11 @@ export class QueryTaskDto {
 
   @IsOptional()
   @IsInt()
+  @Type(() => Number)
+  userId?: number;
+
+  @IsOptional()
+  @IsInt()
   @Min(1)
   @Type(() => Number)
   page?: number = PAGINATION.DEFAULT_PAGE;

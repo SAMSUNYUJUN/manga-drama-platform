@@ -6,7 +6,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { User, Task, TaskVersion, Asset } from './entities';
+import { User, Task, TaskVersion, Asset, WorkflowTemplate, WorkflowTemplateVersion, WorkflowRun, NodeRun, HumanReviewDecisionEntity, PromptTemplate, PromptTemplateVersion, ProviderConfig, GlobalConfig, TrashAsset, NodeTool } from './entities';
+import * as path from 'path';
 
 @Module({
   imports: [
@@ -15,9 +16,27 @@ import { User, Task, TaskVersion, Asset } from './entities';
       useFactory: (configService: ConfigService) => ({
         type: 'sqlite',
         database: configService.get<string>('DATABASE_PATH', './database.sqlite'),
-        entities: [User, Task, TaskVersion, Asset],
-        synchronize: true, // 开发环境自动同步数据库结构
-        logging: true,
+        entities: [
+          User,
+          Task,
+          TaskVersion,
+          Asset,
+          WorkflowTemplate,
+          WorkflowTemplateVersion,
+          WorkflowRun,
+          NodeRun,
+          HumanReviewDecisionEntity,
+          PromptTemplate,
+          PromptTemplateVersion,
+          ProviderConfig,
+          GlobalConfig,
+          TrashAsset,
+          NodeTool,
+        ],
+        migrations: [path.join(__dirname, 'migrations/*{.ts,.js}')],
+        migrationsRun: true,
+        synchronize: false,
+        logging: configService.get<string>('NODE_ENV') !== 'production',
       }),
       inject: [ConfigService],
     }),

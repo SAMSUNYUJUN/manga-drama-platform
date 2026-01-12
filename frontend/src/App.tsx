@@ -9,6 +9,17 @@ import { Login, Register } from './pages/Auth';
 import { Dashboard } from './pages/Dashboard';
 import { TaskList } from './pages/TaskList';
 import { TaskDetail } from './pages/TaskDetail';
+import { TaskWorkflow } from './pages/TaskWorkflow';
+import { Workflows } from './pages/Workflows';
+import { WorkflowDetail } from './pages/WorkflowDetail';
+import { WorkflowEditor } from './pages/WorkflowEditor';
+import { Prompts } from './pages/Prompts';
+import { PromptDetail } from './pages/PromptDetail';
+import { Assets } from './pages/Assets';
+import { Trash } from './pages/Trash';
+import { AdminProviders } from './pages/AdminProviders';
+import { AdminConfig } from './pages/AdminConfig';
+import { NodeTools } from './pages/NodeTools';
 import './App.css';
 
 // 受保护的路由组件
@@ -86,6 +97,94 @@ function App() {
             element={
               <ProtectedRoute>
                 <TaskDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/tasks/:id/workflow"
+            element={
+              <ProtectedRoute>
+                <TaskWorkflow />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/workflows"
+            element={
+              <ProtectedRoute>
+                <Workflows />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/workflows/:id"
+            element={
+              <ProtectedRoute>
+                <WorkflowDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/workflows/:id/editor"
+            element={
+              <ProtectedRoute>
+                <WorkflowEditor />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/prompts"
+            element={
+              <ProtectedRoute>
+                <Prompts />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/prompts/:id"
+            element={
+              <ProtectedRoute>
+                <PromptDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/assets"
+            element={
+              <ProtectedRoute>
+                <Assets />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/trash"
+            element={
+              <ProtectedRoute>
+                <Trash />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/providers"
+            element={
+              <ProtectedRoute>
+                <AdminProviders />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/config"
+            element={
+              <ProtectedRoute>
+                <AdminConfig />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/node-tools"
+            element={
+              <ProtectedRoute>
+                <NodeTools />
               </ProtectedRoute>
             }
           />

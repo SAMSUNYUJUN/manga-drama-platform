@@ -6,7 +6,12 @@
 import axios, { AxiosError } from 'axios';
 import type { ApiResponse } from '@shared/types/api.types';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const rawBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+const API_BASE_URL = rawBaseUrl.startsWith('http')
+  ? rawBaseUrl
+  : rawBaseUrl.startsWith('/')
+  ? rawBaseUrl
+  : `/${rawBaseUrl}`;
 
 // 创建axios实例
 export const api = axios.create({
@@ -32,11 +37,25 @@ api.interceptors.request.use(
 );
 
 // 响应拦截器：统一错误处理
+const buildRequestUrl = (config?: { baseURL?: string; url?: string }) => {
+  const baseURL = config?.baseURL || '';
+  const url = config?.url || '';
+  if (!baseURL) return url;
+  if (url.startsWith('http')) return url;
+  if (!url) return baseURL;
+  return `${baseURL.replace(/\/$/, '')}${url.startsWith('/') ? url : `/${url}`}`;
+};
+
 api.interceptors.response.use(
   (response) => {
     return response;
   },
   (error: AxiosError<ApiResponse>) => {
+    const requestUrl = buildRequestUrl(error.config);
+    const errorCode = (error as any).code as string | undefined;
+    const isCanceled = axios.isCancel(error) || errorCode === 'ERR_CANCELED';
+    const isTimeout = errorCode === 'ECONNABORTED';
+
     if (error.response) {
       const { status, data } = error.response;
 
@@ -49,11 +68,33 @@ api.interceptors.response.use(
 
       // 返回错误消息
       const message = data?.message || data?.error?.message || 'An error occurred';
-      return Promise.reject(new Error(message));
+      const enhancedError = new Error(message) as Error & {
+        status?: number;
+        url?: string;
+        code?: string;
+        isTimeout?: boolean;
+        isCanceled?: boolean;
+      };
+      enhancedError.status = status;
+      enhancedError.url = requestUrl;
+      enhancedError.code = errorCode;
+      enhancedError.isTimeout = isTimeout;
+      enhancedError.isCanceled = isCanceled;
+      return Promise.reject(enhancedError);
     }
 
     if (error.request) {
-      return Promise.reject(new Error('Network error. Please check your connection.'));
+      const enhancedError = new Error('Network error. Please check your connection.') as Error & {
+        url?: string;
+        code?: string;
+        isTimeout?: boolean;
+        isCanceled?: boolean;
+      };
+      enhancedError.url = requestUrl;
+      enhancedError.code = errorCode;
+      enhancedError.isTimeout = isTimeout;
+      enhancedError.isCanceled = isCanceled;
+      return Promise.reject(enhancedError);
     }
 
     return Promise.reject(error);

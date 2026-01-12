@@ -10,7 +10,13 @@ import { AuthModule } from './auth/auth.module';
 import { UserModule } from './user/user.module';
 import { TaskModule } from './task/task.module';
 import { AssetModule } from './asset/asset.module';
-import { JwtAuthGuard } from './auth/guards';
+import { JwtAuthGuard, RolesGuard } from './auth/guards';
+import { ScriptModule } from './script/script.module';
+import { PromptModule } from './prompt/prompt.module';
+import { AdminModule } from './admin/admin.module';
+import { WorkflowModule } from './workflow/workflow.module';
+import { SeedModule } from './database/seed/seed.module';
+import { NodeToolModule } from './node-tool/node-tool.module';
 
 @Module({
   imports: [
@@ -25,6 +31,12 @@ import { JwtAuthGuard } from './auth/guards';
     AssetModule,
     StorageModule,
     AIServiceModule,
+    ScriptModule,
+    PromptModule,
+    AdminModule,
+    WorkflowModule,
+    NodeToolModule,
+    SeedModule,
   ],
   controllers: [AppController],
   providers: [
@@ -32,6 +44,10 @@ import { JwtAuthGuard } from './auth/guards';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
   ],
 })

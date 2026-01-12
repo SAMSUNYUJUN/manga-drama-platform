@@ -5,7 +5,7 @@
 
 import { IsOptional, IsInt, IsEnum, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
-import { AssetType } from '@shared/constants';
+import { AssetStatus, AssetType } from '@shared/constants';
 import { PAGINATION } from '@shared/constants';
 
 export class QueryAssetDto {
@@ -22,6 +22,10 @@ export class QueryAssetDto {
   @IsOptional()
   @IsEnum(AssetType)
   type?: AssetType;
+
+  @IsOptional()
+  @IsEnum(AssetStatus)
+  status?: AssetStatus;
 
   @IsOptional()
   @IsInt()

@@ -8,6 +8,9 @@ export * from './types/user.types';
 export * from './types/task.types';
 export * from './types/asset.types';
 export * from './types/api.types';
+export * from './types/workflow.types';
+export * from './types/prompt.types';
+export * from './types/provider.types';
 
 // 常量导出
 export * from './constants/enums';

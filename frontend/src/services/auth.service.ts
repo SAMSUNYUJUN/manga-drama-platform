@@ -27,6 +27,6 @@ export const login = async (data: LoginDto): Promise<AuthResponse> => {
  * 获取当前用户信息
  */
 export const getProfile = async (): Promise<User> => {
-  const response = await api.get<ApiResponse<User>>('/auth/profile');
+  const response = await api.get<ApiResponse<User>>('/auth/me');
   return response.data.data!;
 };

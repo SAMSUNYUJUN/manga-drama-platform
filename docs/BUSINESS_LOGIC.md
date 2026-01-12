@@ -178,7 +178,7 @@
 
 ## 生成参数配置
 
-### 图片生成参数（即梦API）
+### 图片生成参数（OpenAI-Compatible / Provider）
 
 | 参数 | 可选值 | 默认值 | 说明 |
 |-----|-------|-------|------|
@@ -187,7 +187,9 @@
 | style | realistic, anime, comic | comic | 风格 |
 | quality | draft, normal, high | high | 质量 |
 
-### 视频生成参数（Sora API）
+> Jimeng/Sora 直连参数保留为兼容选项，实际可用字段以当前 Provider 模型定义为准。
+
+### 视频生成参数（OpenAI-Compatible / Provider）
 
 | 参数 | 可选值 | 默认值 | 说明 |
 |-----|-------|-------|------|

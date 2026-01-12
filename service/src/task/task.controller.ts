@@ -16,16 +16,20 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { TaskService } from './task.service';
-import { CreateTaskDto, UpdateTaskDto, QueryTaskDto } from './dto';
+import { TaskVersionService } from './task-version.service';
+import { CreateTaskDto, UpdateTaskDto, QueryTaskDto, CreateTaskVersionDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards';
 import { CurrentUser } from '../common/decorators';
 import { User, Task } from '../database/entities';
-import { ApiResponse, PaginatedResponse, TaskDetail } from '@shared/types';
+import { ApiResponse, PaginatedResponse, TaskDetail, TaskVersion } from '@shared/types';
 
 @Controller('tasks')
 @UseGuards(JwtAuthGuard)
 export class TaskController {
-  constructor(private readonly taskService: TaskService) {}
+  constructor(
+    private readonly taskService: TaskService,
+    private readonly taskVersionService: TaskVersionService,
+  ) {}
 
   /**
    * 创建任务
@@ -110,6 +114,59 @@ export class TaskController {
       success: true,
       data: null,
       message: 'Task deleted successfully',
+    };
+  }
+
+  /**
+   * 创建任务版本
+   * POST /api/tasks/:id/versions
+   */
+  @Post(':id/versions')
+  async createVersion(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: CreateTaskVersionDto,
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<TaskVersion>> {
+    const data = await this.taskVersionService.createVersion(id, body, user);
+    return {
+      success: true,
+      data,
+      message: 'Task version created successfully',
+    };
+  }
+
+  /**
+   * 获取任务版本列表
+   * GET /api/tasks/:id/versions
+   */
+  @Get(':id/versions')
+  async listVersions(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<TaskVersion[]>> {
+    const data = await this.taskVersionService.listVersions(id, user);
+    return {
+      success: true,
+      data,
+      message: 'Task versions retrieved successfully',
+    };
+  }
+
+  /**
+   * 获取任务版本详情
+   * GET /api/tasks/:id/versions/:versionId
+   */
+  @Get(':id/versions/:versionId')
+  async getVersion(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('versionId', ParseIntPipe) versionId: number,
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<TaskVersion>> {
+    const data = await this.taskVersionService.getVersion(id, versionId, user);
+    return {
+      success: true,
+      data,
+      message: 'Task version retrieved successfully',
     };
   }
 }

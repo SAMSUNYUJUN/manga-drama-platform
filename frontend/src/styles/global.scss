@@ -1,4 +1,5 @@
 @use './variables.scss' as *;
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 
 // 全局重置和基础样式
 * {
@@ -28,7 +29,9 @@
 
 body {
   font-family: var(--font-family-sans);
-  background-color: var(--color-bg-main);
+  background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 55%),
+    radial-gradient(circle at bottom right, rgba(20, 184, 166, 0.08), transparent 55%),
+    var(--color-bg-main);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

@@ -53,12 +53,18 @@ export class TaskService {
    * 查询任务列表（分页）
    */
   async findAll(queryDto: QueryTaskDto, user: User): Promise<PaginatedResponse<Task>> {
-    const { status, page = 1, limit = 20 } = queryDto;
+    const { status, userId, page = 1, limit = 20 } = queryDto;
 
     const query = this.taskRepository
       .createQueryBuilder('task')
       .leftJoinAndSelect('task.user', 'user')
-      .where('task.userId = :userId', { userId: user.id });
+      .where(user.role === UserRole.ADMIN ? '1=1' : 'task.userId = :userId', {
+        userId: user.id,
+      });
+
+    if (userId && user.role === UserRole.ADMIN) {
+      query.andWhere('task.userId = :userIdFilter', { userIdFilter: userId });
+    }
 
     if (status) {
       query.andWhere('task.status = :status', { status });

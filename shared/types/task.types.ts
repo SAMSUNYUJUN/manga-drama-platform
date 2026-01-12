@@ -29,6 +29,8 @@ export interface TaskVersion {
   version: number;
   stage: TaskStage;
   metadata?: TaskVersionMetadata;
+  lockedBy?: string | null;
+  lockedAt?: Date | null;
   createdAt: Date;
 }
 

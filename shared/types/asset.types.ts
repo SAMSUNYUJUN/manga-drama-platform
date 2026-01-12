@@ -3,7 +3,7 @@
  * @module shared/types/asset
  */
 
-import { AssetType } from '../constants/enums';
+import { AssetStatus, AssetType } from '../constants/enums';
 
 /**
  * 资产基础信息
@@ -17,6 +17,9 @@ export interface Asset {
   filename: string;
   filesize?: number;
   mimeType?: string;
+  status: AssetStatus;
+  replacedById?: number | null;
+  trashedAt?: Date | null;
   metadata?: AssetMetadata;
   createdAt: Date;
 }
@@ -44,6 +47,7 @@ export interface QueryAssetDto {
   taskId?: number;
   versionId?: number;
   type?: AssetType;
+  status?: AssetStatus;
   page?: number;
   limit?: number;
 }

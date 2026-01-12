@@ -155,6 +155,20 @@
 }
 ```
 
+### trash_assets 表
+
+**说明**: 垃圾桶记录（人工断点丢弃资产与 24h 自动清理）
+
+| 字段 | 类型 | 约束 | 说明 |
+|-----|------|------|------|
+| id | INTEGER | PRIMARY KEY, AUTO_INCREMENT | 记录ID |
+| assetId | INTEGER | FOREIGN KEY → assets.id, NULL | 关联资产 |
+| originRunId | INTEGER | NULL | 来源 WorkflowRun |
+| originNodeId | VARCHAR(64) | NULL | 来源节点ID |
+| metadata | TEXT | NULL | 附加信息(JSON) |
+| expireAt | DATETIME | NOT NULL | 过期时间 |
+| createdAt | DATETIME | NOT NULL | 创建时间 |
+
 ## 数据类型映射
 
 ### TypeORM → SQLite

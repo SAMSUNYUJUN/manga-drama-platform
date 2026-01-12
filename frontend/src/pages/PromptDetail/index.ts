@@ -1,0 +1,1 @@
+export { PromptDetail } from './PromptDetail';
