@@ -1,14 +1,15 @@
 /**
- * Create workflow template DTO
+ * Update workflow template DTO
  * @module workflow/dto
  */
 
 import { IsInt, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class CreateWorkflowTemplateDto {
+export class UpdateWorkflowTemplateDto {
+  @IsOptional()
   @IsString()
-  name: string;
+  name?: string;
 
   @IsOptional()
   @IsString()

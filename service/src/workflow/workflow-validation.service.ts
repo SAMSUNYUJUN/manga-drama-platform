@@ -38,6 +38,29 @@ export class WorkflowValidationService {
       });
     }
 
+    const outputKeyOwners = new Map<string, string[]>();
+    normalizedNodes.forEach((node) => {
+      const vars =
+        node.type === WorkflowNodeType.START
+          ? node.data?.inputs || []
+          : node.data?.outputs || [];
+      vars.forEach((variable) => {
+        if (!variable.key) return;
+        const owners = outputKeyOwners.get(variable.key) || [];
+        owners.push(node.id);
+        outputKeyOwners.set(variable.key, owners);
+      });
+    });
+    outputKeyOwners.forEach((owners, key) => {
+      if (owners.length > 1) {
+        errors.push({
+          code: 'duplicate_output_key',
+          message: `输出变量名重复: ${key}`,
+          details: { nodeIds: owners },
+        });
+      }
+    });
+
     normalizedEdges.forEach((edge) => {
       const source = nodeMap.get(edge.source);
       const target = nodeMap.get(edge.target);
@@ -65,7 +88,9 @@ export class WorkflowValidationService {
           nodeId: target.id,
         });
       }
-      const sourceVar = source.data?.outputs?.find((item) => item.key === edge.sourceOutputKey);
+      const sourceVars =
+        source.type === WorkflowNodeType.START ? source.data?.inputs || [] : source.data?.outputs || [];
+      const sourceVar = sourceVars.find((item) => item.key === edge.sourceOutputKey);
       const targetVar = target.data?.inputs?.find((item) => item.key === edge.targetInputKey);
       if (!sourceVar || !targetVar) {
         errors.push({
@@ -88,10 +113,10 @@ export class WorkflowValidationService {
 
     normalizedNodes.forEach((node) => {
       if (node.type === WorkflowNodeType.START) {
-        if (!node.data?.outputs?.length) {
+        if (!node.data?.inputs?.length) {
           errors.push({
             code: 'missing_required_input',
-            message: 'Start 节点必须至少定义一个输出变量',
+            message: 'Start 节点必须至少定义一个输入变量',
             nodeId: node.id,
           });
         }

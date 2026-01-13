@@ -81,48 +81,68 @@ export class AiOrchestratorService {
     return response.data?.choices?.[0]?.message?.content || '';
   }
 
-  async generateImage(prompt: string, modelOverride?: string): Promise<MediaResult[]> {
+  async generateImage(
+    prompt: string,
+    modelOverride?: string,
+    inputImages?: string[],
+  ): Promise<MediaResult[]> {
+    console.log('[AiOrchestratorService] generateImage START', { model: modelOverride, inputImagesCount: inputImages?.length });
     if (this.aiMode === 'mock') {
       return [this.mockImage()];
     }
+    console.log('[AiOrchestratorService] Getting provider...');
     const { provider, model } = await this.getProvider(ProviderType.IMAGE, modelOverride);
-    const response = await provider.chatCompletions({
-      model,
-      messages: [
-        { role: 'system', content: 'You are an image generation engine. Return image url or base64.' },
-        { role: 'user', content: prompt },
-      ],
-      max_tokens: this.getMaxTokens(),
+    console.log('[AiOrchestratorService] Building multimodal content...');
+    const content = this.buildMultimodalContent(prompt, inputImages);
+    console.log('[AiOrchestratorService] Making API request...');
+    const response = await this.requestWithModelFallback(provider, model, {
+      messages: [{ role: 'user', content }],
+      max_tokens: this.getMediaMaxTokens(),
+      temperature: 0.7,
+    });
+    console.log('[AiOrchestratorService] API request completed, extracting media...');
+    const media = this.extractMedia(response.data);
+    console.log('[AiOrchestratorService] Media extracted:', media.length, 'items');
+    return media;
+  }
+
+  async generateVideo(
+    prompt: string,
+    modelOverride?: string,
+    inputImages?: string[],
+  ): Promise<MediaResult[]> {
+    if (this.aiMode === 'mock') {
+      return [this.mockVideo()];
+    }
+    const { provider, model } = await this.getProvider(ProviderType.VIDEO, modelOverride);
+    const content = this.buildMultimodalContent(prompt, inputImages);
+    const response = await this.requestWithModelFallback(provider, model, {
+      messages: [{ role: 'user', content }],
+      max_tokens: this.getMediaMaxTokens(),
+      temperature: 0.7,
     });
     const media = this.extractMedia(response.data);
     return media;
   }
 
-  async generateVideo(prompt: string, modelOverride?: string): Promise<MediaResult[]> {
-    if (this.aiMode === 'mock') {
-      return [this.mockVideo()];
-    }
-    const { provider, model } = await this.getProvider(ProviderType.VIDEO, modelOverride);
-    const response = await provider.chatCompletions({
-      model,
-      messages: [
-        { role: 'system', content: 'You are a video generation engine. Return video url or base64.' },
-        { role: 'user', content: prompt },
-      ],
-      max_tokens: this.getMaxTokens(),
-    });
-    const media = this.extractMedia(response.data);
-    return media;
+  async resolveProviderType(model?: string): Promise<ProviderType> {
+    if (!model) return ProviderType.LLM;
+    const targetKey = this.normalizeModelKey(model);
+    const providers = await this.providerRepository.find({ where: { enabled: true } });
+    const matched = providers.find((provider) =>
+      provider.models.some((candidate) => this.normalizeModelKey(candidate) === targetKey),
+    );
+    return matched?.type || ProviderType.LLM;
   }
 
   private async getProvider(type: ProviderType, modelOverride?: string) {
     const envBaseUrl = this.configService.get<string>('AI_GATEWAY_BASE_URL');
     const envKey = this.configService.get<string>('AI_GATEWAY_API_KEY');
-    const envTimeout = Number(this.configService.get<string>('AI_TIMEOUT_MS', '60000'));
-    const envRetry = Number(this.configService.get<string>('AI_RETRY_COUNT', '3'));
+    const envTimeout = Number(this.configService.get<string>('AI_TIMEOUT_MS', '180000'));
+    const envRetry = Number(this.configService.get<string>('AI_RETRY_COUNT', '2'));
 
     const globalConfig = await this.globalConfigRepository.findOne({ where: { id: 1 } });
-    const model = modelOverride || this.getDefaultModel(type, globalConfig);
+    const model = this.normalizeModelName(modelOverride || this.getDefaultModel(type, globalConfig));
 
     const providerId =
       type === ProviderType.LLM
@@ -150,6 +170,8 @@ export class AiOrchestratorService {
     if (!apiKey) {
       this.logger.warn(`Missing API key for ${type} provider`);
     }
+
+    this.logger.log(`Provider config: type=${type}, model=${model}, timeout=${timeoutMs}ms, retry=${retryCount}`);
 
     return {
       provider: new OpenAICompatibleProvider({
@@ -181,6 +203,60 @@ export class AiOrchestratorService {
     return Math.min(maxTokens, 600);
   }
 
+  private getMediaMaxTokens(): number {
+    return Math.min(this.getMaxTokens(), 300);
+  }
+
+  private buildMultimodalContent(prompt: string, inputImages?: string[]) {
+    const content: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [];
+    content.push({ type: 'text', text: prompt?.trim() || ' ' });
+    if (inputImages && inputImages.length) {
+      inputImages.slice(0, 3).forEach((url) => {
+        content.push({ type: 'image_url', image_url: { url } });
+      });
+    }
+    return content;
+  }
+
+  private async requestWithModelFallback(
+    provider: OpenAICompatibleProvider,
+    model: string,
+    payload: Record<string, any>,
+  ) {
+    const candidates = this.getModelCandidates(model);
+    let lastError: any = null;
+    for (const candidate of candidates) {
+      try {
+        return await provider.chatCompletions({ model: candidate, ...payload });
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
+  }
+
+  private getModelCandidates(model: string): string[] {
+    const key = this.normalizeModelKey(model);
+    if (key === 'nanobanana') {
+      const variants = ['nano-banana', 'nanobanana'];
+      const unique = new Set([model, ...variants]);
+      return Array.from(unique);
+    }
+    return [model];
+  }
+
+  private normalizeModelKey(model?: string): string {
+    if (!model) return '';
+    return model.toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  private normalizeModelName(model?: string): string {
+    if (!model) return '';
+    const key = this.normalizeModelKey(model);
+    if (key === 'nanobanana') return 'nano-banana';
+    return model.trim();
+  }
+
   private extractMedia(response: any): MediaResult[] {
     const results: MediaResult[] = [];
 
@@ -206,6 +282,47 @@ export class AiOrchestratorService {
     }
 
     if (typeof content === 'string') {
+      // Handle nano-banana special marker: |>![g2pimage](url)
+      // This must be checked before general markdown extraction
+      const nanoBananaMarkerRegex = /\|>!\[g2pimage\]\(([^)]+)\)/g;
+      const nanoBananaMatches = Array.from(content.matchAll(nanoBananaMarkerRegex));
+      if (nanoBananaMatches.length > 0) {
+        nanoBananaMatches.forEach((match) => {
+          const url = match[1];
+          if (url && url.startsWith('http')) {
+            results.push({ url });
+          }
+        });
+        if (results.length > 0) return results;
+      }
+
+      // Extract Markdown image links: ![alt](url)
+      const markdownImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+      const markdownMatches = Array.from(content.matchAll(markdownImageRegex));
+      if (markdownMatches.length > 0) {
+        markdownMatches.forEach((match) => {
+          const url = match[2];
+          if (url && url.startsWith('http')) {
+            results.push({ url });
+          }
+        });
+        if (results.length > 0) return results;
+      }
+
+      // Handle nano-banana base64 data format: "|>g2pimage" followed by base64
+      const markerMatch = content.match(/\|>g2pimage([A-Za-z0-9+/=\s]+)/);
+      if (markerMatch) {
+        const base64Data = markerMatch[1].replace(/\s+/g, ''); // Remove whitespace
+        if (base64Data.length > 100) { // Sanity check for valid base64
+          try {
+            results.push({ data: Buffer.from(base64Data, 'base64'), mimeType: 'image/png' });
+            return results;
+          } catch (error) {
+            this.logger.warn('Failed to decode nano-banana image data', error);
+          }
+        }
+      }
+
       const jsonObject = this.tryParseJson(content);
       if (jsonObject) {
         const url =
@@ -239,9 +356,26 @@ export class AiOrchestratorService {
   }
 
   private extractMediaUrl(content: string): string | null {
-    const regex = /(https?:\/\/[^\s)]+?\.(png|jpg|jpeg|gif|mp4|webm))/i;
-    const match = content.match(regex);
-    return match ? match[1] : null;
+    // First try to match URLs with common media extensions
+    const extRegex = /(https?:\/\/[^\s)]+?\.(png|jpg|jpeg|gif|mp4|webm))/i;
+    const extMatch = content.match(extRegex);
+    if (extMatch) return extMatch[1];
+    
+    // Fallback: match any HTTP(S) URL that looks like a media resource
+    // This handles URLs without extensions or with query parameters
+    const urlRegex = /(https?:\/\/[^\s)]+)/i;
+    const urlMatch = content.match(urlRegex);
+    if (urlMatch) {
+      const url = urlMatch[1];
+      // Check if URL contains common media hosting patterns or paths
+      if (url.includes('/png/') || url.includes('/jpg/') || url.includes('/jpeg/') || 
+          url.includes('/image/') || url.includes('/video/') || url.includes('/mp4/') ||
+          url.includes('cloudflare') || url.includes('nananobanana')) {
+        return url;
+      }
+    }
+    
+    return null;
   }
 
   private extractDataUri(content: string): { mimeType: string; base64: string } | null {

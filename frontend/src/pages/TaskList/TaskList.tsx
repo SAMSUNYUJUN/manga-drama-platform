@@ -14,6 +14,7 @@ export const TaskList = () => {
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     loadTasks();
@@ -42,6 +43,19 @@ export const TaskList = () => {
     await loadTasks();
   };
 
+  const handleDelete = async (task: Task) => {
+    if (!window.confirm(`确定删除任务「${task.title}」吗？该任务下的版本和运行记录会被清理。`)) {
+      return;
+    }
+    try {
+      setDeleteError('');
+      await taskService.deleteTask(task.id);
+      await loadTasks();
+    } catch (error: any) {
+      setDeleteError(error?.message || '删除任务失败');
+    }
+  };
+
   return (
     <div className={styles.taskList}>
       <div className={styles.pageHeader}>
@@ -62,6 +76,7 @@ export const TaskList = () => {
           </button>
         </div>
       </div>
+      {deleteError && <div className={styles.deleteError}>{deleteError}</div>}
 
       {tasks.length === 0 ? (
         <div className={styles.emptyState}>
@@ -90,6 +105,9 @@ export const TaskList = () => {
                 <Link to={`/tasks/${task.id}`} className={styles.linkAction}>
                   详情
                 </Link>
+                <button className={styles.deleteAction} onClick={() => handleDelete(task)}>
+                  删除
+                </button>
               </div>
             </div>
           ))}

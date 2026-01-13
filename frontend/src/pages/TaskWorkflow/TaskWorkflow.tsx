@@ -5,8 +5,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import type { TaskDetail, TaskVersion } from '@shared/types/task.types';
-import type { WorkflowRun, NodeRun, WorkflowTemplateVersion, WorkflowVariable } from '@shared/types/workflow.types';
+import type { TaskDetail } from '@shared/types/task.types';
+import type { WorkflowRun, NodeRun, WorkflowTemplate, WorkflowTemplateVersion, WorkflowVariable } from '@shared/types/workflow.types';
 import type { Asset } from '@shared/types/asset.types';
 import { taskService, workflowService, scriptService } from '../../services';
 import { WorkflowNodeType } from '@shared/constants';
@@ -15,8 +15,10 @@ import styles from './TaskWorkflow.module.scss';
 export const TaskWorkflow = () => {
   const { id } = useParams<{ id: string }>();
   const [task, setTask] = useState<TaskDetail | null>(null);
-  const [versions, setVersions] = useState<TaskVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+  const [templateVersionsMap, setTemplateVersionsMap] = useState<Record<number, WorkflowTemplateVersion[]>>({});
   const [templateVersions, setTemplateVersions] = useState<WorkflowTemplateVersion[]>([]);
   const [selectedTemplateVersionId, setSelectedTemplateVersionId] = useState<number | null>(null);
   const [selectedTemplateVersion, setSelectedTemplateVersion] = useState<WorkflowTemplateVersion | null>(null);
@@ -30,6 +32,7 @@ export const TaskWorkflow = () => {
   const [breakpointSelections, setBreakpointSelections] = useState<number[]>([]);
   const [scriptFile, setScriptFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [templateError, setTemplateError] = useState('');
 
   const waitingNode = useMemo(
     () => nodeRuns.find((node) => node.status === 'WAITING_HUMAN' || node.status === 'PAUSED'),
@@ -60,16 +63,48 @@ export const TaskWorkflow = () => {
     if (!id) return;
     const data = await taskService.getTask(Number(id));
     setTask(data);
-    setVersions(data.versions || []);
     setSelectedVersionId(data.currentVersionId || data.versions?.[0]?.id || null);
   };
 
   const loadTemplates = async () => {
-    const templates = await workflowService.listWorkflowTemplates();
-    if (!templates.length) return;
-    const versions = await workflowService.listWorkflowTemplateVersions(templates[0].id);
-    setTemplateVersions(versions);
-    setSelectedTemplateVersionId(versions[0]?.id || null);
+    try {
+      setTemplateError('');
+      const data = await workflowService.listWorkflowTemplates();
+      setTemplates(data);
+      if (!data.length) {
+        setSelectedTemplateId(null);
+        setTemplateVersions([]);
+        setSelectedTemplateVersionId(null);
+        return;
+      }
+      const entries = await Promise.all(
+        data.map(async (template) => ({
+          templateId: template.id,
+          versions: await workflowService.listWorkflowTemplateVersions(template.id),
+        })),
+      );
+      const nextMap: Record<number, WorkflowTemplateVersion[]> = {};
+      entries.forEach((entry) => {
+        nextMap[entry.templateId] = entry.versions;
+      });
+      setTemplateVersionsMap(nextMap);
+      const preferredTemplateId =
+        (selectedTemplateId && data.some((template) => template.id === selectedTemplateId))
+          ? selectedTemplateId
+          : data[0].id;
+      setSelectedTemplateId(preferredTemplateId);
+      const versions = nextMap[preferredTemplateId] || [];
+      setTemplateVersions(versions);
+      setSelectedTemplateVersionId((prev) =>
+        prev && versions.some((item) => item.id === prev) ? prev : versions[0]?.id || null,
+      );
+    } catch (error: any) {
+      setTemplateError(error?.message || '工作流模板加载失败');
+      setTemplates([]);
+      setTemplateVersions([]);
+      setSelectedTemplateId(null);
+      setSelectedTemplateVersionId(null);
+    }
   };
 
   const loadRun = async (taskId: number, versionId: number) => {
@@ -107,22 +142,53 @@ export const TaskWorkflow = () => {
   }, [task, selectedVersionId]);
 
   useEffect(() => {
-    if (!selectedTemplateVersionId) return;
+    if (!selectedTemplateId) {
+      setTemplateVersions([]);
+      setSelectedTemplateVersionId(null);
+      return;
+    }
+    const versions = templateVersionsMap[selectedTemplateId] || [];
+    setTemplateVersions(versions);
+    setSelectedTemplateVersionId((prev) =>
+      prev && versions.some((item) => item.id === prev) ? prev : versions[0]?.id || null,
+    );
+  }, [selectedTemplateId, templateVersionsMap]);
+
+  useEffect(() => {
+    if (!selectedTemplateVersionId) {
+      setSelectedTemplateVersion(null);
+      return;
+    }
     const version = templateVersions.find((item) => item.id === selectedTemplateVersionId) || null;
     setSelectedTemplateVersion(version);
     const startNode = version?.nodes?.find((node) => node.type === WorkflowNodeType.START);
-    const outputs = (startNode?.data?.outputs || []) as WorkflowVariable[];
+    const inputs = (startNode?.data?.inputs || []) as WorkflowVariable[];
     const nextInputs: Record<string, any> = {};
-    outputs.forEach((output) => {
-      const value = output.defaultValue;
+    inputs.forEach((input) => {
+      const value = input.defaultValue;
       if (value && typeof value === 'object') {
-        nextInputs[output.key] = JSON.stringify(value, null, 2);
+        nextInputs[input.key] = JSON.stringify(value, null, 2);
       } else {
-        nextInputs[output.key] = value ?? '';
+        nextInputs[input.key] = value ?? '';
       }
     });
     setStartInputs(nextInputs);
   }, [selectedTemplateVersionId, templateVersions]);
+
+  useEffect(() => {
+    if (!run || !Object.keys(templateVersionsMap).length) return;
+    const match = Object.entries(templateVersionsMap).find(([, versions]) =>
+      versions.some((version) => version.id === run.templateVersionId),
+    );
+    if (!match) return;
+    const templateId = Number(match[0]);
+    if (selectedTemplateId !== templateId) {
+      setSelectedTemplateId(templateId);
+    }
+    if (selectedTemplateVersionId !== run.templateVersionId) {
+      setSelectedTemplateVersionId(run.templateVersionId);
+    }
+  }, [run?.templateVersionId, templateVersionsMap, selectedTemplateId, selectedTemplateVersionId]);
 
   useEffect(() => {
     if (waitingNode) {
@@ -141,28 +207,28 @@ export const TaskWorkflow = () => {
     setValidationWarnings(validation.warnings.map((item) => item.message));
     if (!validation.ok) return;
     const startNode = selectedTemplateVersion?.nodes?.find((node) => node.type === WorkflowNodeType.START);
-    const outputs = (startNode?.data?.outputs || []) as WorkflowVariable[];
+    const inputs = (startNode?.data?.inputs || []) as WorkflowVariable[];
     const payloadInputs: Record<string, any> = {};
-    outputs.forEach((output) => {
-      const raw = startInputs[output.key];
-      if (output.type === 'number') {
-        payloadInputs[output.key] = raw === '' ? undefined : Number(raw);
+    inputs.forEach((input) => {
+      const raw = startInputs[input.key];
+      if (input.type === 'number') {
+        payloadInputs[input.key] = raw === '' ? undefined : Number(raw);
         return;
       }
-      if (output.type === 'boolean') {
-        payloadInputs[output.key] = raw === true || raw === 'true';
+      if (input.type === 'boolean') {
+        payloadInputs[input.key] = raw === true || raw === 'true';
         return;
       }
-      if (output.type === 'json' || output.type.startsWith('list<')) {
+      if (input.type === 'json' || input.type.startsWith('list<')) {
         try {
-          payloadInputs[output.key] = raw ? JSON.parse(raw) : raw;
+          payloadInputs[input.key] = raw ? JSON.parse(raw) : raw;
           return;
         } catch {
-          payloadInputs[output.key] = raw;
+          payloadInputs[input.key] = raw;
           return;
         }
       }
-      payloadInputs[output.key] = raw;
+      payloadInputs[input.key] = raw;
     });
     const data = await workflowService.startWorkflowRun(
       task.id,
@@ -250,34 +316,44 @@ export const TaskWorkflow = () => {
 
       <section className={styles.panelRow}>
         <div className={styles.panel}>
-          <h3>选择版本</h3>
+          <h3>选择工作流模板</h3>
           <select
-            value={selectedVersionId || ''}
-            onChange={(event) => setSelectedVersionId(Number(event.target.value))}
+            value={selectedTemplateId || ''}
+            onChange={(event) =>
+              setSelectedTemplateId(event.target.value ? Number(event.target.value) : null)
+            }
           >
-            {versions.map((version) => (
-              <option key={version.id} value={version.id}>
-                v{version.version} - {version.stage}
+            <option value="">-- 选择模板 --</option>
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}
               </option>
             ))}
           </select>
+          {templateError && <div className={styles.validationErrors}>{templateError}</div>}
+          {!templates.length && <div>暂无可用工作流模板</div>}
         </div>
         <div className={styles.panel}>
           <h3>选择工作流模板版本</h3>
           <select
             value={selectedTemplateVersionId || ''}
-            onChange={(event) => setSelectedTemplateVersionId(Number(event.target.value))}
+            onChange={(event) =>
+              setSelectedTemplateVersionId(event.target.value ? Number(event.target.value) : null)
+            }
+            disabled={!selectedTemplateId}
           >
+            <option value="">-- 选择版本 --</option>
             {templateVersions.map((version) => (
               <option key={version.id} value={version.id}>
                 v{version.version} (ID {version.id})
               </option>
             ))}
           </select>
+          {selectedTemplateId && !templateVersions.length && <div>当前模板暂无版本</div>}
         </div>
         <div className={styles.panel}>
           <h3>Start 输入</h3>
-          {Object.keys(startInputs).length === 0 && <div>未配置 Start 输出变量</div>}
+          {Object.keys(startInputs).length === 0 && <div>未配置 Start 输入变量</div>}
           {Object.entries(startInputs).map(([key, value]) => (
             <div key={key} className={styles.startInputRow}>
               <label>{key}</label>

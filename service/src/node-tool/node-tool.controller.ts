@@ -3,10 +3,11 @@
  * @module node-tool
  */
 
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, Logger, Delete } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, Logger, Delete, UseInterceptors, UploadedFiles, BadRequestException } from '@nestjs/common';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { NodeToolService } from './node-tool.service';
 import { ApiResponse } from '@shared/types';
-import { CreateNodeToolDto, UpdateNodeToolDto, TestNodeToolDto } from './dto';
+import { CreateNodeToolDto, UpdateNodeToolDto } from './dto';
 import { Roles } from '../common/decorators';
 import { UserRole } from '@shared/constants';
 import { NodeTool } from '../database/entities';
@@ -85,13 +86,18 @@ export class NodeToolController {
 
   @Post('node-tools/:id/test')
   @Roles(UserRole.ADMIN)
+  @UseInterceptors(AnyFilesInterceptor())
   async testTool(
     @Param('id', ParseIntPipe) id: number,
-    @Body() dto: TestNodeToolDto,
+    @Body() dto: any,
+    @UploadedFiles() files: any[],
   ): Promise<ApiResponse<any>> {
     this.logger.log(`[node-tools/${id}/test] hit`);
     try {
-      const data = await this.nodeToolService.testToolById(id, dto.inputs);
+      const inputs = this.parseInputs(dto?.inputs);
+      const data = files?.length
+        ? await this.nodeToolService.testToolByIdWithFiles(id, inputs, files)
+        : await this.nodeToolService.testToolById(id, inputs);
       return { success: true, data, message: 'Node tool test completed' };
     } catch (error: any) {
       this.logger.error(
@@ -104,18 +110,52 @@ export class NodeToolController {
 
   @Post('node-tools/test')
   @Roles(UserRole.ADMIN)
+  @UseInterceptors(AnyFilesInterceptor())
   async testToolConfig(
-    @Body() dto: TestNodeToolDto,
+    @Body() dto: any,
+    @UploadedFiles() files: any[],
   ): Promise<ApiResponse<any>> {
+    const promptVersionId = this.toPromptVersionId(dto?.promptTemplateVersionId);
     this.logger.log(
-      `[node-tools/test] hit promptVersion=${dto.promptTemplateVersionId ?? 'none'}`,
+      `[node-tools/test] hit promptVersion=${promptVersionId ?? 'none'}`,
     );
     try {
-      const data = await this.nodeToolService.testToolConfig(dto);
+      const inputs = this.parseInputs(dto?.inputs);
+      const data = files?.length
+        ? await this.nodeToolService.testToolConfigWithFiles(
+            { promptTemplateVersionId: promptVersionId, model: dto?.model, inputs },
+            files,
+          )
+        : await this.nodeToolService.testToolConfig({
+            promptTemplateVersionId: promptVersionId,
+            model: dto?.model,
+            inputs,
+          });
       return { success: true, data, message: 'Node tool test completed' };
     } catch (error: any) {
       this.logger.error('[node-tools/test] failed', error?.stack || String(error));
       throw error;
     }
+  }
+
+  private parseInputs(raw: any): Record<string, any> {
+    if (!raw) return {};
+    if (typeof raw === 'string') {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        throw new BadRequestException('Invalid inputs JSON');
+      }
+    }
+    if (typeof raw === 'object') {
+      return raw;
+    }
+    return {};
+  }
+
+  private toPromptVersionId(raw: any): number | undefined {
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : undefined;
   }
 }

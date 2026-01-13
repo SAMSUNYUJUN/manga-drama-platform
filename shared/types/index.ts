@@ -6,6 +6,7 @@
 export * from './user.types';
 export * from './task.types';
 export * from './asset.types';
+export * from './asset-space.types';
 export * from './api.types';
 export * from './workflow.types';
 export * from './prompt.types';

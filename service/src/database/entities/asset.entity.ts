@@ -16,17 +16,21 @@ import { AssetStatus, AssetType } from '@shared/constants';
 import { AssetMetadata } from '@shared/types';
 import { Task } from './task.entity';
 import { TaskVersion } from './task-version.entity';
+import { AssetSpace } from './asset-space.entity';
 
 @Entity('assets')
 export class Asset {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ type: 'int' })
-  taskId: number;
+  @Column({ type: 'int', nullable: true })
+  taskId?: number | null;
 
   @Column({ type: 'int', nullable: true })
-  versionId: number;
+  spaceId?: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  versionId?: number | null;
 
   @Column({ type: 'varchar', length: 50 })
   type: AssetType;
@@ -62,9 +66,13 @@ export class Asset {
   updatedAt: Date;
 
   // 关系
-  @ManyToOne(() => Task, (task) => task.assets, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Task, (task) => task.assets, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'taskId' })
-  task: Task;
+  task?: Task;
+
+  @ManyToOne(() => AssetSpace, (space) => space.assets, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'spaceId' })
+  space?: AssetSpace;
 
   @ManyToOne(() => TaskVersion, (version) => version.assets, {
     onDelete: 'SET NULL',

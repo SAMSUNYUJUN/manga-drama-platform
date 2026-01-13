@@ -11,16 +11,15 @@ import {
   User,
   Task,
   TaskVersion,
-  PromptTemplate,
-  PromptTemplateVersion,
   WorkflowTemplate,
   WorkflowTemplateVersion,
+  WorkflowRun,
   ProviderConfig,
   GlobalConfig,
-  NodeTool,
 } from '../entities';
-import { UserRole, TaskStatus, TaskStage, WorkflowNodeType, ProviderType } from '@shared/constants';
+import { UserRole, TaskStatus, TaskStage, ProviderType } from '@shared/constants';
 import { ConfigService } from '@nestjs/config';
+import { In } from 'typeorm';
 
 @Injectable()
 export class SeedService implements OnModuleInit {
@@ -34,20 +33,16 @@ export class SeedService implements OnModuleInit {
     private taskRepository: Repository<Task>,
     @InjectRepository(TaskVersion)
     private taskVersionRepository: Repository<TaskVersion>,
-    @InjectRepository(PromptTemplate)
-    private promptTemplateRepository: Repository<PromptTemplate>,
-    @InjectRepository(PromptTemplateVersion)
-    private promptVersionRepository: Repository<PromptTemplateVersion>,
     @InjectRepository(WorkflowTemplate)
     private workflowTemplateRepository: Repository<WorkflowTemplate>,
     @InjectRepository(WorkflowTemplateVersion)
     private workflowVersionRepository: Repository<WorkflowTemplateVersion>,
+    @InjectRepository(WorkflowRun)
+    private workflowRunRepository: Repository<WorkflowRun>,
     @InjectRepository(ProviderConfig)
     private providerRepository: Repository<ProviderConfig>,
     @InjectRepository(GlobalConfig)
     private globalConfigRepository: Repository<GlobalConfig>,
-    @InjectRepository(NodeTool)
-    private nodeToolRepository: Repository<NodeTool>,
   ) {}
 
   async onModuleInit() {
@@ -56,8 +51,6 @@ export class SeedService implements OnModuleInit {
 
     await this.seedAdminUser();
     await this.seedProviders();
-    await this.seedPrompt();
-    await this.seedNodeTools();
     await this.seedWorkflow();
     await this.seedSampleTask();
   }
@@ -130,103 +123,23 @@ export class SeedService implements OnModuleInit {
     this.logger.log('Seeded providers and global config');
   }
 
-  private async seedPrompt() {
-    const existing = await this.promptTemplateRepository.findOne({ where: { name: 'Character Prompt' } });
-    if (existing) return;
-
-    const template = await this.promptTemplateRepository.save(
-      this.promptTemplateRepository.create({
-        name: 'Character Prompt',
-        description: 'Character design base prompt',
-      }),
-    );
-
-    await this.promptVersionRepository.save(
-      this.promptVersionRepository.create({
-        templateId: template.id,
-        version: 1,
-        name: '默认版本',
-        content: 'A {{character}} in {{style}} style, high detail, clean line art.',
-        variablesJson: JSON.stringify(['character', 'style']),
-      }),
-    );
-    this.logger.log('Seeded prompt template');
-  }
-
-  private async seedNodeTools() {
-    const existing = await this.nodeToolRepository.findOne({ where: { name: 'Character Prompt Tool' } });
-    if (existing) return;
-
-    const template = await this.promptTemplateRepository.findOne({ where: { name: 'Character Prompt' } });
-    if (!template) return;
-    const version = await this.promptVersionRepository.findOne({
-      where: { templateId: template.id },
-      order: { version: 'DESC' },
-    });
-    if (!version) return;
-
-    const tool = this.nodeToolRepository.create({
-      name: 'Character Prompt Tool',
-      description: 'LLM prompt tool for character design',
-      promptTemplateVersionId: version.id,
-      model: this.configService.get<string>('LLM_MODEL', 'deepseek-v3.2'),
-      enabled: true,
-      inputsJson: '[]',
-      outputsJson: '[]',
-    });
-    tool.inputs = [
-      { key: 'character', name: '角色', type: 'text', required: true },
-      { key: 'style', name: '风格', type: 'text', required: true },
-    ];
-    tool.outputs = [{ key: 'prompt', name: 'Prompt 输出', type: 'text', required: true }];
-    await this.nodeToolRepository.save(tool);
-    this.logger.log('Seeded node tool');
-  }
-
   private async seedWorkflow() {
     const existing = await this.workflowTemplateRepository.findOne({ where: { name: 'Default Workflow' } });
-    if (existing) return;
-
-    const template = await this.workflowTemplateRepository.save(
-      this.workflowTemplateRepository.create({
-        name: 'Default Workflow',
-        description: 'Default linear workflow with human review',
-      }),
-    );
-
-    const nodes = [
-      { id: 'node-start', type: WorkflowNodeType.START, position: { x: -200, y: 0 }, data: { config: {} } },
-      { id: 'node-llm', type: WorkflowNodeType.LLM_PARSE_SCRIPT, position: { x: 0, y: 0 }, data: { config: {} } },
-      { id: 'node-story', type: WorkflowNodeType.GENERATE_STORYBOARD, position: { x: 200, y: 0 }, data: { config: {} } },
-      { id: 'node-char', type: WorkflowNodeType.GENERATE_CHARACTER_IMAGES, position: { x: 400, y: 0 }, data: { config: { requireHuman: true } } },
-      { id: 'node-review', type: WorkflowNodeType.HUMAN_REVIEW_ASSETS, position: { x: 600, y: 0 }, data: { config: { requireHuman: true } } },
-      { id: 'node-scene', type: WorkflowNodeType.GENERATE_SCENE_IMAGE, position: { x: 800, y: 0 }, data: { config: {} } },
-      { id: 'node-key', type: WorkflowNodeType.GENERATE_KEYFRAMES, position: { x: 1000, y: 0 }, data: { config: {} } },
-      { id: 'node-video', type: WorkflowNodeType.GENERATE_VIDEO, position: { x: 1200, y: 0 }, data: { config: {} } },
-      { id: 'node-final', type: WorkflowNodeType.FINAL_COMPOSE, position: { x: 1400, y: 0 }, data: { config: {} } },
-      { id: 'node-end', type: WorkflowNodeType.END, position: { x: 1600, y: 0 }, data: { config: {} } },
-    ];
-    const edges = [
-      { id: 'e0', source: 'node-start', target: 'node-llm' },
-      { id: 'e1', source: 'node-llm', target: 'node-story' },
-      { id: 'e2', source: 'node-story', target: 'node-char' },
-      { id: 'e3', source: 'node-char', target: 'node-review' },
-      { id: 'e4', source: 'node-review', target: 'node-scene' },
-      { id: 'e5', source: 'node-scene', target: 'node-key' },
-      { id: 'e6', source: 'node-key', target: 'node-video' },
-      { id: 'e7', source: 'node-video', target: 'node-final' },
-      { id: 'e8', source: 'node-final', target: 'node-end' },
-    ];
-
-    await this.workflowVersionRepository.save(
-      this.workflowVersionRepository.create({
-        templateId: template.id,
-        version: 1,
-        nodesJson: JSON.stringify(nodes),
-        edgesJson: JSON.stringify(edges),
-      }),
-    );
-    this.logger.log('Seeded workflow template');
+    if (existing) {
+      const versions = await this.workflowVersionRepository.find({ where: { templateId: existing.id } });
+      const versionIds = versions.map((version) => version.id);
+      if (versionIds.length) {
+        const runCount = await this.workflowRunRepository.count({ where: { templateVersionId: In(versionIds) } });
+        if (runCount > 0) {
+          this.logger.warn('Default Workflow has existing runs, skip auto-removal');
+          return;
+        }
+      }
+      await this.workflowVersionRepository.delete({ templateId: existing.id });
+      await this.workflowTemplateRepository.remove(existing);
+      this.logger.log('Removed default workflow template');
+      return;
+    }
   }
 
   private async seedSampleTask() {

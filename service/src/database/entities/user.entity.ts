@@ -13,6 +13,7 @@ import {
 } from 'typeorm';
 import { UserRole } from '@shared/constants';
 import { Task } from './task.entity';
+import { AssetSpace } from './asset-space.entity';
 
 @Entity('users')
 export class User {
@@ -40,4 +41,7 @@ export class User {
   // 关系
   @OneToMany(() => Task, (task) => task.user)
   tasks: Task[];
+
+  @OneToMany(() => AssetSpace, (space) => space.user)
+  assetSpaces: AssetSpace[];
 }

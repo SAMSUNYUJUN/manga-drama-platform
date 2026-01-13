@@ -104,6 +104,11 @@
   font-size: 12px;
 }
 
+.fileHint {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
 .testOutput {
   background: var(--color-bg-card);
   border: 1px solid var(--border-color);
@@ -112,4 +117,18 @@
   font-size: 11px;
   max-height: 240px;
   overflow: auto;
+}
+
+.imagePreview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.imagePreview img {
+  width: 100%;
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--color-bg-card);
+  object-fit: cover;
 }

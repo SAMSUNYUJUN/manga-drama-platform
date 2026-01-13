@@ -8,6 +8,85 @@
   font-size: 24px;
 }
 
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: var(--spacing-lg);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.spaceForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-lg);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--border-color);
+}
+
+.spaceList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.spaceItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-lg);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--border-color);
+  text-align: left;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+  cursor: pointer;
+  color: var(--color-text-primary);
+}
+
+.spaceItem:hover {
+  border-color: var(--border-color-hover);
+  transform: translateY(-1px);
+}
+
+.spaceItemActive {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px rgba(20, 86, 179, 0.12);
+}
+
+.spaceDelete {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.spaceDelete:hover {
+  color: var(--color-error);
+}
+
+.uploadPanel {
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-lg);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
 .list {
   display: flex;
   flex-direction: column;
@@ -26,6 +105,7 @@
 
 .title {
   font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
 }
 
 .meta {
@@ -36,4 +116,23 @@
 .actions {
   display: flex;
   gap: var(--spacing-sm);
+}
+
+.empty {
+  padding: var(--spacing-md);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border-radius: var(--border-radius-lg);
+  border: 1px dashed var(--border-color);
+}
+
+.error {
+  color: var(--color-error);
+  font-size: 12px;
+}
+
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
 }

@@ -13,6 +13,7 @@ import {
   Task,
   TaskVersion,
   Asset,
+  AssetSpace,
   HumanReviewDecisionEntity,
   TrashAsset,
 } from '../database/entities';
@@ -36,6 +37,7 @@ import { NodeToolModule } from '../node-tool/node-tool.module';
       Task,
       TaskVersion,
       Asset,
+      AssetSpace,
       HumanReviewDecisionEntity,
       TrashAsset,
     ]),

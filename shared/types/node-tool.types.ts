@@ -21,6 +21,7 @@ export interface NodeTool {
 export interface NodeToolTestResult {
   renderedPrompt: string;
   outputText: string;
+  mediaUrls?: string[];
   parsedJson?: any;
   missingVariables: string[];
   durationMs: number;

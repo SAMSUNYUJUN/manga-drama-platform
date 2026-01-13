@@ -43,7 +43,15 @@
   background: var(--color-bg-elevated);
   border: 1px solid var(--border-color);
   color: inherit;
+  cursor: pointer;
   transition: transform var(--transition-fast), border-color var(--transition-fast);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
 }
 
 .card:hover {
@@ -63,6 +71,8 @@
 .cardMeta {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
   font-size: 12px;
   color: var(--color-text-tertiary);
 }

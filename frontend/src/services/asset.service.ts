@@ -10,6 +10,7 @@ import type { AssetStatus, AssetType } from '@shared/constants';
 
 export const listAssets = async (params?: {
   taskId?: number;
+  spaceId?: number;
   versionId?: number;
   type?: AssetType;
   status?: AssetStatus;

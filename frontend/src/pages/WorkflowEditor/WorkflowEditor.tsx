@@ -11,23 +11,26 @@ import ReactFlow, {
   MiniMap,
   useEdgesState,
   useNodesState,
+  useUpdateNodeInternals,
   Handle,
   Position,
 } from 'reactflow';
 import type { Connection, Edge, Node, NodeProps } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { workflowService, promptService, adminService, nodeToolService } from '../../services';
+import { workflowService, promptService, adminService, nodeToolService, assetService, assetSpaceService } from '../../services';
 import type {
   WorkflowEdge,
   WorkflowNode,
   WorkflowValidationResult,
   WorkflowValueType,
   WorkflowVariable,
+  WorkflowTestResult,
 } from '@shared/types/workflow.types';
+import type { Asset } from '@shared/types/asset.types';
 import type { PromptTemplateVersion } from '@shared/types/prompt.types';
 import type { ProviderConfig } from '@shared/types/provider.types';
 import type { NodeTool } from '@shared/types/node-tool.types';
-import { ProviderType, WorkflowNodeType } from '@shared/constants';
+import { AssetStatus, PAGINATION, ProviderType, WorkflowNodeType } from '@shared/constants';
 import styles from './WorkflowEditor.module.scss';
 
 type EditorNodeData = {
@@ -38,6 +41,33 @@ type EditorNodeData = {
   outputs?: WorkflowVariable[];
   locked?: boolean;
 };
+
+const encodeHandleId = (value?: string) => (value ? encodeURIComponent(value) : value);
+const decodeHandleId = (value?: string | null) => {
+  if (!value) return undefined;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+const isImageUrl = (value?: string) => {
+  if (!value) return false;
+  if (value.startsWith('data:image/')) return true;
+  return /\.(png|jpg|jpeg|gif|webp)(\?|#|$)/i.test(value);
+};
+const isVideoUrl = (value?: string) => {
+  if (!value) return false;
+  if (value.startsWith('data:video/')) return true;
+  return /\.(mp4|webm|mov|mkv)(\?|#|$)/i.test(value);
+};
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 
 const VARIABLE_TYPES: WorkflowValueType[] = [
   'text',
@@ -56,8 +86,8 @@ const FIXED_LIBRARY = [WorkflowNodeType.HUMAN_BREAKPOINT];
 
 const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; outputs: WorkflowVariable[] }> = {
   [WorkflowNodeType.START]: {
-    inputs: [],
-    outputs: [{ key: 'input', name: '输入文本', type: 'text', required: true }],
+    inputs: [{ key: 'input', name: '输入文本', type: 'text', required: true }],
+    outputs: [],
   },
   [WorkflowNodeType.END]: {
     inputs: [{ key: 'result', name: '最终输出', type: 'text', required: true }],
@@ -165,8 +195,14 @@ const normalizeNodes = (nodes: Node<EditorNodeData>[]) =>
     const nodeType = (node.data?.nodeType || node.type || (node.data as any)?.label) as WorkflowNodeType;
     const defaults = DEFAULT_VARIABLES[nodeType];
     const data = node.data || { config: {} };
-    const inputs = data.inputs?.length ? data.inputs : defaults?.inputs || [];
-    const outputs = data.outputs?.length ? data.outputs : defaults?.outputs || [];
+    let inputs = data.inputs?.length ? data.inputs : defaults?.inputs || [];
+    let outputs = data.outputs?.length ? data.outputs : defaults?.outputs || [];
+    if (nodeType === WorkflowNodeType.START) {
+      if (!inputs.length && outputs.length) {
+        inputs = outputs;
+      }
+      outputs = [];
+    }
     return {
       ...node,
       type: nodeType,
@@ -186,12 +222,19 @@ const normalizeEdges = (nodes: Node<EditorNodeData>[], edges: Edge[]) => {
   return edges.map((edge) => {
     const source = nodeMap.get(edge.source);
     const target = nodeMap.get(edge.target);
-    const sourceKey = (edge as any).sourceOutputKey || edge.sourceHandle || source?.data?.outputs?.[0]?.key;
-    const targetKey = (edge as any).targetInputKey || edge.targetHandle || target?.data?.inputs?.[0]?.key;
+    const sourceKey =
+      (edge as any).sourceOutputKey ||
+      decodeHandleId(edge.sourceHandle) ||
+      source?.data?.outputs?.[0]?.key ||
+      ((source?.data?.nodeType || source?.type) === WorkflowNodeType.START
+        ? source?.data?.inputs?.[0]?.key
+        : undefined);
+    const targetKey =
+      (edge as any).targetInputKey || decodeHandleId(edge.targetHandle) || target?.data?.inputs?.[0]?.key;
     return {
       ...edge,
-      sourceHandle: sourceKey,
-      targetHandle: targetKey,
+      sourceHandle: sourceKey ? encodeHandleId(sourceKey) : undefined,
+      targetHandle: targetKey ? encodeHandleId(targetKey) : undefined,
       sourceOutputKey: sourceKey,
       targetInputKey: targetKey,
     } as Edge;
@@ -206,38 +249,55 @@ const getTypeCompatibility = (source?: WorkflowValueType, target?: WorkflowValue
   return { ok: false as const };
 };
 
-const VariableNode = ({ data }: NodeProps<EditorNodeData>) => {
+const VariableNode = ({ id, data }: NodeProps<EditorNodeData>) => {
+  const updateNodeInternals = useUpdateNodeInternals();
   const inputs = data.inputs || [];
   const outputs = data.outputs || [];
   const isStart = data.nodeType === WorkflowNodeType.START;
   const isEnd = data.nodeType === WorkflowNodeType.END;
+  const displayInputs = isStart ? [] : inputs;
+  const displayOutputs = isStart ? inputs : outputs;
+  const handleSignature = useMemo(
+    () =>
+      [
+        isStart ? 'start' : 'node',
+        isEnd ? 'end' : 'mid',
+        inputs.map((item) => item.key).join('|'),
+        outputs.map((item) => item.key).join('|'),
+      ].join('::'),
+    [inputs, outputs, isStart, isEnd],
+  );
+
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, updateNodeInternals, handleSignature]);
   return (
     <div className={styles.nodeCard}>
       <div className={styles.nodeTitle}>{data.label || data.nodeType}</div>
       <div className={styles.nodeBody}>
         <div className={styles.nodeColumn}>
-          {inputs.map((input) => (
+          {displayInputs.map((input) => (
             <div key={input.key} className={styles.nodeRow}>
               <Handle
                 type="target"
                 position={Position.Left}
-                id={input.key}
+                id={encodeHandleId(input.key)}
                 isConnectable={!isStart}
               />
-              <span className={styles.nodeLabel}>{input.name || input.key}</span>
+              <span className={styles.nodeLabel}>{input.key}</span>
               <span className={styles.nodeType}>{input.type}</span>
             </div>
           ))}
         </div>
         <div className={styles.nodeColumn}>
-          {outputs.map((output) => (
+          {displayOutputs.map((output) => (
             <div key={output.key} className={styles.nodeRow}>
-              <span className={styles.nodeLabel}>{output.name || output.key}</span>
+              <span className={styles.nodeLabel}>{output.key}</span>
               <span className={styles.nodeType}>{output.type}</span>
               <Handle
                 type="source"
                 position={Position.Right}
-                id={output.key}
+                id={encodeHandleId(output.key)}
                 isConnectable={!isEnd}
               />
             </div>
@@ -277,14 +337,105 @@ export const WorkflowEditor = () => {
   const [modelLoadError, setModelLoadError] = useState('');
   const [validationResult, setValidationResult] = useState<WorkflowValidationResult | null>(null);
   const [connectionError, setConnectionError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [nodeTestInputs, setNodeTestInputs] = useState<Record<string, Record<string, any>>>({});
   const [nodeTestResults, setNodeTestResults] = useState<Record<string, any>>({});
+  const [workflowTestInputs, setWorkflowTestInputs] = useState<Record<string, any>>({});
+  const [workflowTestResult, setWorkflowTestResult] = useState<WorkflowTestResult | null>(null);
+  const [workflowTestError, setWorkflowTestError] = useState('');
+  const [workflowTestRunning, setWorkflowTestRunning] = useState(false);
+  const [workflowTestAssets, setWorkflowTestAssets] = useState<Asset[]>([]);
+  const [workflowTestAssetSpaceId, setWorkflowTestAssetSpaceId] = useState<number | null>(null);
+  const [workflowTestAssetLoading, setWorkflowTestAssetLoading] = useState(false);
+  const [workflowTestAssetError, setWorkflowTestAssetError] = useState('');
+  const nodeTypes = useMemo(() => NODE_TYPES, []);
+  const edgeTypes = useMemo(() => EDGE_TYPES, []);
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId),
     [nodes, selectedNodeId],
   );
-  const isToolNode = selectedNode?.data?.nodeType === WorkflowNodeType.LLM_TOOL;
+  const selectedNodeType = selectedNode
+    ? ((selectedNode.data?.nodeType || selectedNode.type) as WorkflowNodeType)
+    : undefined;
+  const isToolNode = selectedNodeType === WorkflowNodeType.LLM_TOOL;
+  const isStartOrEnd = selectedNodeType === WorkflowNodeType.START || selectedNodeType === WorkflowNodeType.END;
+  const showInputMapping = selectedNodeType !== WorkflowNodeType.START;
+  const startNode = useMemo(
+    () => nodes.find((node) => (node.data?.nodeType || node.type) === WorkflowNodeType.START) || null,
+    [nodes],
+  );
+  const startNodeInputs = useMemo(
+    () => ((startNode?.data?.inputs || []) as WorkflowVariable[]),
+    [startNode],
+  );
+  const outputOptions = useMemo(() => {
+    if (!selectedNode) return [];
+    const items: Array<{
+      value: string;
+      label: string;
+      nodeId: string;
+      outputKey: string;
+      type: WorkflowValueType;
+    }> = [];
+    nodes.forEach((node) => {
+      if (node.id === selectedNode.id) return;
+      const nodeType = (node.data?.nodeType || node.type) as WorkflowNodeType;
+      const outputs = nodeType === WorkflowNodeType.START ? node.data?.inputs || [] : node.data?.outputs || [];
+      const label = node.data?.label || node.data?.nodeType || node.type || node.id;
+      outputs.forEach((output) => {
+        items.push({
+          value: `${node.id}::${output.key}`,
+          label: `${label} · ${output.key} (${output.type})`,
+          nodeId: node.id,
+          outputKey: output.key,
+          type: output.type,
+        });
+      });
+    });
+    return items;
+  }, [nodes, selectedNode]);
+
+  const workflowTestMediaUrls = useMemo(() => {
+    const urls: string[] = [];
+    const pushUrl = (value: any) => {
+      if (typeof value === 'string' && /^(https?:\/\/|data:image\/|data:video\/)/i.test(value)) {
+        urls.push(value);
+      }
+    };
+    const collect = (value: any) => {
+      if (typeof value === 'string') {
+        pushUrl(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((item) => collect(item));
+      } else if (value && typeof value === 'object') {
+        Object.values(value).forEach((item) => collect(item));
+      }
+    };
+    if (workflowTestResult?.finalOutput) {
+      collect(workflowTestResult.finalOutput);
+    }
+    return Array.from(new Set(urls));
+  }, [workflowTestResult]);
+
+  const workflowTestAssetMap = useMemo(
+    () => new Map(workflowTestAssets.map((asset) => [asset.id, asset])),
+    [workflowTestAssets],
+  );
+  const workflowTestSelectableAssets = useMemo(
+    () =>
+      workflowTestAssets.filter((asset) => {
+        if (asset.mimeType?.startsWith('image/') || asset.mimeType?.startsWith('video/')) return true;
+        return isImageUrl(asset.url) || isVideoUrl(asset.url);
+      }),
+    [workflowTestAssets],
+  );
+  const hasAssetTestInputs = useMemo(
+    () => startNodeInputs.some((input) => input.type === 'asset_ref' || input.type === 'list<asset_ref>'),
+    [startNodeInputs],
+  );
 
   const modelOptions = useMemo(() => {
     if (!selectedNode) return [];
@@ -318,19 +469,22 @@ export const WorkflowEditor = () => {
       }
 
       const sourceOutputs = sourceNode.data?.outputs || [];
+      const sourceInputs = sourceNode.data?.inputs || [];
       const targetInputs = targetNode.data?.inputs || [];
-      const sourceKey = connection.sourceHandle || sourceOutputs[0]?.key;
+      const isStartSource = (sourceNode.data?.nodeType || sourceNode.type) === WorkflowNodeType.START;
+      const sourceVars = isStartSource ? sourceInputs : sourceOutputs;
+      const sourceKey = decodeHandleId(connection.sourceHandle) || sourceVars[0]?.key;
       if (!sourceKey) {
-        showConnectionError('源节点没有可用输出变量');
+        showConnectionError('源节点没有可用变量');
         return;
       }
-      const sourceVar = sourceOutputs.find((item) => item.key === sourceKey);
+      const sourceVar = sourceVars.find((item) => item.key === sourceKey);
       if (!sourceVar) {
         showConnectionError('未找到源变量');
         return;
       }
 
-      let targetKey = connection.targetHandle || targetInputs[0]?.key;
+      let targetKey = decodeHandleId(connection.targetHandle) || targetInputs[0]?.key;
       let targetVar = targetInputs.find((item) => item.key === targetKey);
       if (!targetVar) {
         const autoKey = targetKey || `input_${targetInputs.length + 1}`;
@@ -367,8 +521,8 @@ export const WorkflowEditor = () => {
         id: `e-${connection.source}-${connection.target}-${Date.now()}`,
         source: connection.source,
         target: connection.target,
-        sourceHandle: sourceKey,
-        targetHandle: targetKey,
+        sourceHandle: encodeHandleId(sourceKey),
+        targetHandle: encodeHandleId(targetKey),
         sourceOutputKey: sourceKey,
         targetInputKey: targetKey,
         transform: compatibility.transform,
@@ -484,12 +638,18 @@ export const WorkflowEditor = () => {
     value: any,
   ) => {
     if (!selectedNode) return;
+    const isStartNode = (selectedNode.data?.nodeType || selectedNode.type) === WorkflowNodeType.START;
     const previousKey = selectedNode.data[group]?.[index]?.key;
+    const previousName = selectedNode.data[group]?.[index]?.name;
     setNodes((nds) =>
       nds.map((node) => {
         if (node.id !== selectedNode.id) return node;
         const list = [...(node.data[group] || [])];
-        list[index] = { ...list[index], [field]: value };
+        const updated = { ...list[index], [field]: value };
+        if (field === 'key' && (previousName === undefined || previousName === '' || previousName === previousKey)) {
+          updated.name = value;
+        }
+        list[index] = updated;
         return { ...node, data: { ...node.data, [group]: list } };
       }),
     );
@@ -499,14 +659,15 @@ export const WorkflowEditor = () => {
           if (group === 'inputs' && edge.target === selectedNode.id && (edge as any).targetInputKey === previousKey) {
             return {
               ...edge,
-              targetHandle: value,
+              targetHandle: encodeHandleId(value),
               targetInputKey: value,
             } as Edge;
           }
-          if (group === 'outputs' && edge.source === selectedNode.id && (edge as any).sourceOutputKey === previousKey) {
+          const isSourceMatch = edge.source === selectedNode.id && (edge as any).sourceOutputKey === previousKey;
+          if ((group === 'outputs' && isSourceMatch) || (group === 'inputs' && isStartNode && isSourceMatch)) {
             return {
               ...edge,
-              sourceHandle: value,
+              sourceHandle: encodeHandleId(value),
               sourceOutputKey: value,
             } as Edge;
           }
@@ -531,6 +692,7 @@ export const WorkflowEditor = () => {
 
   const handleRemoveVariable = (group: 'inputs' | 'outputs', index: number) => {
     if (!selectedNode) return;
+    const isStartNode = (selectedNode.data?.nodeType || selectedNode.type) === WorkflowNodeType.START;
     const variable = selectedNode.data[group]?.[index];
     setNodes((nds) =>
       nds.map((node) => {
@@ -542,11 +704,14 @@ export const WorkflowEditor = () => {
     );
     if (variable) {
       setEdges((eds) =>
-        eds.filter((edge) =>
-          group === 'inputs'
-            ? (edge as any).targetInputKey !== variable.key
-            : (edge as any).sourceOutputKey !== variable.key,
-        ),
+        eds.filter((edge) => {
+          if (group === 'inputs') {
+            const targetMatch = edge.target === selectedNode.id && (edge as any).targetInputKey === variable.key;
+            const startSourceMatch = isStartNode && edge.source === selectedNode.id && (edge as any).sourceOutputKey === variable.key;
+            return !targetMatch && !startSourceMatch;
+          }
+          return (edge as any).sourceOutputKey !== variable.key;
+        }),
       );
     }
   };
@@ -604,26 +769,37 @@ export const WorkflowEditor = () => {
   const loadVersion = async () => {
     if (!id) return;
     const versionId = searchParams.get('versionId');
-    if (versionId) {
-      const data = await workflowService.getWorkflowTemplateVersion(Number(id), Number(versionId));
-      const normalizedNodes = normalizeNodes((data.nodes || []) as Node<EditorNodeData>[]);
-      const normalizedEdges = normalizeEdges(normalizedNodes, (data.edges || []) as Edge[]);
-      setNodes(normalizedNodes as Node<EditorNodeData>[]);
-      setEdges(normalizedEdges as Edge[]);
-    } else {
-      setNodes(normalizeNodes([]));
-      setEdges([]);
+    try {
+      if (versionId) {
+        const data = await workflowService.getWorkflowTemplateVersion(Number(id), Number(versionId));
+        const normalizedNodes = normalizeNodes((data.nodes || []) as Node<EditorNodeData>[]);
+        const normalizedEdges = normalizeEdges(normalizedNodes, (data.edges || []) as Edge[]);
+        setNodes(normalizedNodes as Node<EditorNodeData>[]);
+        setEdges(normalizedEdges as Edge[]);
+      } else {
+        setNodes(normalizeNodes([]));
+        setEdges([]);
+      }
+      setLoadError('');
+    } catch (error: any) {
+      setLoadError(error?.message || '加载工作流版本失败');
     }
   };
 
   const loadPromptVersions = async () => {
-    const prompts = await promptService.listPrompts();
-    const versions: PromptTemplateVersion[] = [];
-    for (const prompt of prompts) {
-      const list = await promptService.listPromptVersions(prompt.id);
-      list.forEach((version) => versions.push(version));
+    try {
+      const prompts = await promptService.listPrompts();
+      const versions: PromptTemplateVersion[] = [];
+      for (const prompt of prompts) {
+        const list = await promptService.listPromptVersions(prompt.id);
+        list.forEach((version) => versions.push(version));
+      }
+      setPromptVersions(versions);
+      setLoadError('');
+    } catch (error: any) {
+      setPromptVersions([]);
+      setLoadError(error?.message || '加载 Prompt 模板失败');
     }
-    setPromptVersions(versions);
   };
 
   const loadProviders = async () => {
@@ -638,8 +814,14 @@ export const WorkflowEditor = () => {
   };
 
   const loadNodeTools = async () => {
-    const list = await nodeToolService.listNodeTools(true);
-    setNodeTools(list);
+    try {
+      const list = await nodeToolService.listNodeTools(true);
+      setNodeTools(list);
+      setLoadError('');
+    } catch (error: any) {
+      setNodeTools([]);
+      setLoadError(error?.message || '加载节点工具失败');
+    }
   };
 
   const runNodeTest = async () => {
@@ -687,12 +869,216 @@ export const WorkflowEditor = () => {
     }));
   };
 
+  const handleInputMappingChange = (input: WorkflowVariable, value: string) => {
+    if (!selectedNode) return;
+    if (!value) {
+      setEdges((eds) =>
+        eds.filter(
+          (edge) => !(edge.target === selectedNode.id && (edge as any).targetInputKey === input.key),
+        ),
+      );
+      return;
+    }
+    const [sourceId, outputKey] = value.split('::');
+    const sourceNode = nodes.find((node) => node.id === sourceId);
+    if (!sourceNode) return;
+    const sourceNodeType = (sourceNode.data?.nodeType || sourceNode.type) as WorkflowNodeType;
+    const sourceVars =
+      sourceNodeType === WorkflowNodeType.START ? sourceNode.data?.inputs || [] : sourceNode.data?.outputs || [];
+    const sourceVar = sourceVars.find((item) => item.key === outputKey);
+    if (!sourceVar) return;
+    const compatibility = getTypeCompatibility(sourceVar.type, input.type);
+    if (!compatibility.ok) {
+      showConnectionError(`类型不匹配: ${sourceVar.type} -> ${input.type}`);
+      return;
+    }
+    setEdges((eds) => {
+      let updated = false;
+      const next = eds.map((edge) => {
+        if (edge.target === selectedNode.id && (edge as any).targetInputKey === input.key) {
+          updated = true;
+          return {
+            ...edge,
+            source: sourceId,
+            sourceHandle: encodeHandleId(outputKey),
+            sourceOutputKey: outputKey,
+            targetHandle: encodeHandleId(input.key),
+            targetInputKey: input.key,
+            transform: compatibility.transform,
+          } as Edge;
+        }
+        return edge;
+      });
+      if (!updated) {
+        next.push({
+          id: `e-${sourceId}-${selectedNode.id}-${input.key}-${Date.now()}`,
+          source: sourceId,
+          target: selectedNode.id,
+          sourceHandle: encodeHandleId(outputKey),
+          targetHandle: encodeHandleId(input.key),
+          sourceOutputKey: outputKey,
+          targetInputKey: input.key,
+          transform: compatibility.transform,
+        } as Edge);
+      }
+      return next;
+    });
+  };
+
+  const updateWorkflowTestInput = (key: string, value: any) => {
+    setWorkflowTestInputs((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const resolveTestInputAssetIds = (value: any) => {
+    if (typeof value === 'number') return [value];
+    if (Array.isArray(value)) {
+      const ids: number[] = [];
+      value.forEach((item) => {
+        if (typeof item === 'number') {
+          ids.push(item);
+          return;
+        }
+        if (typeof item === 'string') {
+          const parsed = Number(item);
+          if (Number.isFinite(parsed)) ids.push(parsed);
+        }
+      });
+      return ids;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? [parsed] : [];
+    }
+    return [];
+  };
+
+  const resolveTestInputMediaUrls = (value: any) => {
+    const urls: string[] = [];
+    const pushValue = (item: any) => {
+      if (typeof item === 'number') {
+        const asset = workflowTestAssetMap.get(item);
+        if (asset && (isImageUrl(asset.url) || isVideoUrl(asset.url))) {
+          urls.push(asset.url);
+        }
+        return;
+      }
+      if (typeof item === 'string') {
+        if (isImageUrl(item) || isVideoUrl(item)) urls.push(item);
+        return;
+      }
+      if (item && typeof item === 'object') {
+        const url = item.url || item.image_url?.url;
+        if (typeof url === 'string' && (isImageUrl(url) || isVideoUrl(url))) {
+          urls.push(url);
+        }
+      }
+    };
+    if (Array.isArray(value)) {
+      value.forEach((item) => pushValue(item));
+      return urls;
+    }
+    pushValue(value);
+    return urls;
+  };
+
+  const handleWorkflowTestAssetUpload = async (
+    inputKey: string,
+    files: FileList | null,
+    isList: boolean,
+  ) => {
+    const fileList = files ? Array.from(files) : [];
+    if (!fileList.length) {
+      updateWorkflowTestInput(inputKey, isList ? [] : '');
+      return;
+    }
+    if (workflowTestAssetSpaceId) {
+      try {
+        setWorkflowTestAssetError('');
+        const uploads = await assetSpaceService.uploadAssetsToSpace(workflowTestAssetSpaceId, fileList);
+        if (uploads.length) {
+          setWorkflowTestAssets((prev) => {
+            const seen = new Set<number>();
+            const next = [...uploads, ...prev].filter((asset) => {
+              if (seen.has(asset.id)) return false;
+              seen.add(asset.id);
+              return true;
+            });
+            return next;
+          });
+        }
+        const ids = uploads.map((asset) => asset.id);
+        updateWorkflowTestInput(inputKey, isList ? ids : ids[0] ?? '');
+      } catch (error: any) {
+        setWorkflowTestAssetError(error?.message || '上传资产失败');
+        updateWorkflowTestInput(inputKey, isList ? [] : '');
+      }
+      return;
+    }
+    try {
+      const dataUris = await Promise.all(fileList.map((file) => readFileAsDataUrl(file)));
+      updateWorkflowTestInput(inputKey, isList ? dataUris : dataUris[0]);
+    } catch {
+      updateWorkflowTestInput(inputKey, isList ? [] : '');
+    }
+  };
+
+  const handleWorkflowTestAssetSelect = (
+    inputKey: string,
+    value: string,
+    selectedOptions: HTMLOptionsCollection,
+    isList: boolean,
+  ) => {
+    if (isList) {
+      const ids = Array.from(selectedOptions)
+        .map((option) => Number(option.value))
+        .filter((id) => Number.isFinite(id));
+      updateWorkflowTestInput(inputKey, ids);
+      return;
+    }
+    const id = value ? Number(value) : NaN;
+    updateWorkflowTestInput(inputKey, Number.isFinite(id) ? id : '');
+  };
+
   useEffect(() => {
     loadVersion();
     loadPromptVersions();
     loadProviders();
     loadNodeTools();
   }, [id, searchParams.toString()]);
+
+  useEffect(() => {
+    const loadWorkflowTestAssets = async () => {
+      if (!id) return;
+      setWorkflowTestAssetLoading(true);
+      setWorkflowTestAssetError('');
+      try {
+        const template = await workflowService.getWorkflowTemplate(Number(id));
+        const spaceId = template.spaceId ?? null;
+        setWorkflowTestAssetSpaceId(spaceId);
+        if (!spaceId) {
+          setWorkflowTestAssets([]);
+          return;
+        }
+        const data = await assetService.listAssets({
+          spaceId,
+          status: AssetStatus.ACTIVE,
+          page: 1,
+          limit: PAGINATION.MAX_LIMIT,
+        });
+        setWorkflowTestAssets(data.items || []);
+      } catch (error: any) {
+        setWorkflowTestAssets([]);
+        setWorkflowTestAssetSpaceId(null);
+        setWorkflowTestAssetError(error?.message || '加载资产失败');
+      } finally {
+        setWorkflowTestAssetLoading(false);
+      }
+    };
+    loadWorkflowTestAssets();
+  }, [id]);
 
   useEffect(() => {
     if (!selectedNode) return;
@@ -705,6 +1091,91 @@ export const WorkflowEditor = () => {
     if (!missing) return;
     handleConfigChange('variables', buildVariablesFromVersion(versionId, current));
   }, [selectedNodeId, selectedNode?.data?.config?.promptTemplateVersionId, promptVersions]);
+
+  useEffect(() => {
+    setWorkflowTestInputs((prev) => {
+      const next = { ...prev };
+      startNodeInputs.forEach((input) => {
+        if (!(input.key in next)) {
+          const value = input.defaultValue;
+          const isAssetInput = input.type === 'asset_ref' || input.type === 'list<asset_ref>';
+          if (isAssetInput) {
+            if (value !== undefined) {
+              next[input.key] = value;
+            } else {
+              next[input.key] = input.type === 'list<asset_ref>' ? [] : '';
+            }
+            return;
+          }
+          if (value && typeof value === 'object') {
+            next[input.key] = JSON.stringify(value, null, 2);
+            return;
+          }
+          next[input.key] = value ?? '';
+        }
+      });
+      Object.keys(next).forEach((key) => {
+        if (!startNodeInputs.some((input) => input.key === key)) {
+          delete next[key];
+        }
+      });
+      return next;
+    });
+  }, [startNodeInputs]);
+
+  const runWorkflowTest = async () => {
+    if (!startNode) {
+      setWorkflowTestError('未找到 Start 节点');
+      return;
+    }
+    const normalizedNodes = normalizeNodes(nodes).map((node) => ({
+      ...node,
+      type: node.data?.nodeType || node.type,
+      data: {
+        ...node.data,
+        nodeType: node.data?.nodeType || node.type,
+      },
+    }));
+    const normalizedEdges = normalizeEdges(normalizedNodes, edges);
+    const inputs: Record<string, any> = {};
+    startNodeInputs.forEach((input) => {
+      const raw = workflowTestInputs[input.key];
+      if (input.type === 'number') {
+        inputs[input.key] = raw === '' || raw === undefined ? undefined : Number(raw);
+        return;
+      }
+      if (input.type === 'boolean') {
+        inputs[input.key] = raw === true || raw === 'true';
+        return;
+      }
+      if (input.type === 'json' || input.type.startsWith('list<')) {
+        try {
+          inputs[input.key] = raw ? JSON.parse(raw) : raw;
+          return;
+        } catch {
+          inputs[input.key] = raw;
+          return;
+        }
+      }
+      inputs[input.key] = raw;
+    });
+    setWorkflowTestRunning(true);
+    setWorkflowTestError('');
+    try {
+      const result = await workflowService.testWorkflow({
+        nodes: normalizedNodes as unknown as WorkflowNode[],
+        edges: normalizedEdges as unknown as WorkflowEdge[],
+        startInputs: inputs,
+        templateId: id ? Number(id) : undefined,
+      });
+      setWorkflowTestResult(result);
+    } catch (error: any) {
+      setWorkflowTestResult(null);
+      setWorkflowTestError(error?.message || '工作流测试失败');
+    } finally {
+      setWorkflowTestRunning(false);
+    }
+  };
 
   return (
     <div className={styles.editor}>
@@ -774,8 +1245,8 @@ export const WorkflowEditor = () => {
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          nodeTypes={NODE_TYPES}
-          edgeTypes={EDGE_TYPES}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
@@ -791,6 +1262,7 @@ export const WorkflowEditor = () => {
 
       <aside className={styles.config}>
         <h3>节点配置</h3>
+        {loadError && <div className={styles.validationError}>{loadError}</div>}
         {selectedNode ? (
           <div className={styles.configForm}>
             <label>节点名称</label>
@@ -807,9 +1279,7 @@ export const WorkflowEditor = () => {
               }
             />
 
-            {selectedNode.data?.nodeType !== WorkflowNodeType.START &&
-              selectedNode.data?.nodeType !== WorkflowNodeType.END &&
-              !isToolNode && (
+            {!isStartOrEnd && !isToolNode && (
               <>
                 <label>Prompt 模板版本</label>
                 <select
@@ -923,138 +1393,276 @@ export const WorkflowEditor = () => {
 
             <div className={styles.variableSection}>
               <h4>输入变量</h4>
-              {(selectedNode.data.inputs || []).map((item, index) => (
-                <div key={item.key} className={styles.variableRow}>
-                  <input
-                    value={item.key}
-                    onChange={(event) => handleVariableChange('inputs', index, 'key', event.target.value)}
-                    disabled={isToolNode}
-                  />
-                  <input
-                    value={item.name || ''}
-                    onChange={(event) => handleVariableChange('inputs', index, 'name', event.target.value)}
-                    disabled={isToolNode}
-                  />
-                  <select
-                    value={item.type}
-                    onChange={(event) =>
-                      handleVariableChange('inputs', index, 'type', event.target.value as WorkflowValueType)
-                    }
-                    disabled={isToolNode}
-                  >
-                    {VARIABLE_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={
-                      item.defaultValue && typeof item.defaultValue === 'object'
-                        ? JSON.stringify(item.defaultValue)
-                        : item.defaultValue ?? ''
-                    }
-                    onChange={(event) => handleVariableChange('inputs', index, 'defaultValue', event.target.value)}
-                    placeholder="default"
-                    disabled={isToolNode}
-                  />
-                  <label className={styles.checkbox}>
+              <div className={styles.variableHeader}>
+                <span>变量名(唯一)</span>
+                <span>类型</span>
+                {showInputMapping && <span>输入映射</span>}
+                <span>默认值</span>
+                <span>必填</span>
+                <span>操作</span>
+              </div>
+              {(selectedNode.data.inputs || []).map((item, index) => {
+                const currentEdge = edges.find(
+                  (edge) =>
+                    edge.target === selectedNode.id &&
+                    (edge as any).targetInputKey === item.key,
+                );
+                const currentValue = currentEdge
+                  ? `${currentEdge.source}::${(currentEdge as any).sourceOutputKey}`
+                  : '';
+                return (
+                  <div key={`inputs-${index}`} className={styles.variableRow}>
                     <input
-                      type="checkbox"
-                      checked={!!item.required}
-                      onChange={(event) => handleVariableChange('inputs', index, 'required', event.target.checked)}
-                      disabled={isToolNode}
+                      value={item.key}
+                      placeholder="变量名"
+                      onChange={(event) => handleVariableChange('inputs', index, 'key', event.target.value)}
                     />
-                    必填
-                  </label>
-                  {!isToolNode && (
+                    <select
+                      value={item.type}
+                      onChange={(event) =>
+                        handleVariableChange('inputs', index, 'type', event.target.value as WorkflowValueType)
+                      }
+                    >
+                      {VARIABLE_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </select>
+                    {showInputMapping && (
+                      <select
+                        value={currentValue}
+                        onChange={(event) => handleInputMappingChange(item, event.target.value)}
+                      >
+                        <option value="">-- 未绑定 --</option>
+                        {outputOptions.map((option) => {
+                          const compatibility = getTypeCompatibility(option.type, item.type);
+                          return (
+                            <option key={option.value} value={option.value} disabled={!compatibility.ok}>
+                              {option.label}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    )}
+                    <input
+                      value={
+                        item.defaultValue && typeof item.defaultValue === 'object'
+                          ? JSON.stringify(item.defaultValue)
+                          : item.defaultValue ?? ''
+                      }
+                      onChange={(event) => handleVariableChange('inputs', index, 'defaultValue', event.target.value)}
+                      placeholder="default"
+                    />
+                    <label className={styles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={!!item.required}
+                        onChange={(event) => handleVariableChange('inputs', index, 'required', event.target.checked)}
+                      />
+                      必填
+                    </label>
                     <button className="btn btn--outline btn--sm" onClick={() => handleRemoveVariable('inputs', index)}>
                       删除
                     </button>
-                  )}
-                </div>
-              ))}
-              {!isToolNode && (
-                <button className="btn btn--secondary btn--sm" onClick={() => handleAddVariable('inputs')}>
-                  添加输入
-                </button>
-              )}
+                  </div>
+                );
+              })}
+              <button className="btn btn--secondary btn--sm" onClick={() => handleAddVariable('inputs')}>
+                添加输入
+              </button>
             </div>
 
-            <div className={styles.variableSection}>
-              <h4>输出变量</h4>
-              {(selectedNode.data.outputs || []).map((item, index) => (
-                <div key={item.key} className={styles.variableRow}>
-                  <input
-                    value={item.key}
-                    onChange={(event) => handleVariableChange('outputs', index, 'key', event.target.value)}
-                    disabled={isToolNode}
-                  />
-                  <input
-                    value={item.name || ''}
-                    onChange={(event) => handleVariableChange('outputs', index, 'name', event.target.value)}
-                    disabled={isToolNode}
-                  />
-                  <select
-                    value={item.type}
-                    onChange={(event) =>
-                      handleVariableChange('outputs', index, 'type', event.target.value as WorkflowValueType)
-                    }
-                    disabled={isToolNode}
-                  >
-                    {VARIABLE_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                  {!isToolNode && (
+            {selectedNodeType !== WorkflowNodeType.START && (
+              <div className={styles.variableSection}>
+                <h4>输出变量</h4>
+                <div className={styles.variableHeader}>
+                  <span>变量名(唯一)</span>
+                  <span>类型</span>
+                  <span></span>
+                  <span>操作</span>
+                </div>
+                {(selectedNode.data.outputs || []).map((item, index) => (
+                  <div key={`outputs-${index}`} className={styles.variableRow}>
+                    <input
+                      value={item.key}
+                      placeholder="变量名"
+                      onChange={(event) => handleVariableChange('outputs', index, 'key', event.target.value)}
+                    />
+                    <select
+                      value={item.type}
+                      onChange={(event) =>
+                        handleVariableChange('outputs', index, 'type', event.target.value as WorkflowValueType)
+                      }
+                    >
+                      {VARIABLE_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </select>
                     <button className="btn btn--outline btn--sm" onClick={() => handleRemoveVariable('outputs', index)}>
                       删除
                     </button>
-                  )}
-                </div>
-              ))}
-              {!isToolNode && (
+                  </div>
+                ))}
                 <button className="btn btn--secondary btn--sm" onClick={() => handleAddVariable('outputs')}>
                   添加输出
                 </button>
-              )}
-            </div>
-
-            <div className={styles.testSection}>
-              <h4>节点测试</h4>
-              {(selectedNode.data.inputs || []).map((input) => (
-                <div key={input.key} className={styles.testRow}>
-                  <label>{input.name || input.key}</label>
-                  {input.type === 'boolean' ? (
-                    <input
-                      type="checkbox"
-                      checked={!!nodeTestInputs[selectedNode.id]?.[input.key]}
-                      onChange={(event) => updateNodeTestInput(input.key, event.target.checked)}
-                    />
-                  ) : (
-                    <textarea
-                      rows={2}
-                      value={nodeTestInputs[selectedNode.id]?.[input.key] ?? ''}
-                      onChange={(event) => updateNodeTestInput(input.key, event.target.value)}
-                    />
-                  )}
-                </div>
-              ))}
-              <button className="btn btn--primary btn--sm" onClick={runNodeTest}>
-                运行节点测试
-              </button>
-              {nodeTestResults[selectedNode.id] && (
-                <pre className={styles.testOutput}>
-                  {JSON.stringify(nodeTestResults[selectedNode.id], null, 2)}
-                </pre>
-              )}
-            </div>
+              </div>
+            )}
+            {!isStartOrEnd && (
+              <div className={styles.testSection}>
+                <h4>节点测试</h4>
+                {(selectedNode.data.inputs || []).map((input) => (
+                  <div key={input.key} className={styles.testRow}>
+                    <label>{input.name || input.key}</label>
+                    {input.type === 'boolean' ? (
+                      <input
+                        type="checkbox"
+                        checked={!!nodeTestInputs[selectedNode.id]?.[input.key]}
+                        onChange={(event) => updateNodeTestInput(input.key, event.target.checked)}
+                      />
+                    ) : (
+                      <textarea
+                        rows={2}
+                        value={nodeTestInputs[selectedNode.id]?.[input.key] ?? ''}
+                        onChange={(event) => updateNodeTestInput(input.key, event.target.value)}
+                      />
+                    )}
+                  </div>
+                ))}
+                <button className="btn btn--primary btn--sm" onClick={runNodeTest}>
+                  运行节点测试
+                </button>
+                {nodeTestResults[selectedNode.id] && (
+                  <pre className={styles.testOutput}>
+                    {JSON.stringify(nodeTestResults[selectedNode.id], null, 2)}
+                  </pre>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <p className={styles.empty}>选择节点以配置参数</p>
         )}
+
+        <div className={styles.workflowTest}>
+          <h3>工作流测试</h3>
+          {!startNode && <div className={styles.empty}>未找到 Start 节点</div>}
+          {hasAssetTestInputs && workflowTestAssetLoading && (
+            <div className={styles.hint}>资产加载中...</div>
+          )}
+          {hasAssetTestInputs && workflowTestAssetError && (
+            <div className={styles.validationError}>{workflowTestAssetError}</div>
+          )}
+          {hasAssetTestInputs && !workflowTestAssetLoading && !workflowTestAssetError && !workflowTestAssetSpaceId && (
+            <div className={styles.hint}>未绑定资产空间，仅支持上传图片作为输入</div>
+          )}
+          {startNodeInputs.map((input) => (
+            <div key={input.key} className={styles.testRow}>
+              <label>{input.name || input.key}</label>
+              {input.type === 'asset_ref' || input.type === 'list<asset_ref>' ? (
+                (() => {
+                  const isList = input.type === 'list<asset_ref>';
+                  const rawValue = workflowTestInputs[input.key];
+                  const selectedAssetIds = resolveTestInputAssetIds(rawValue);
+                  const previewUrls = resolveTestInputMediaUrls(rawValue);
+                  const selectValue = isList
+                    ? selectedAssetIds.map((id) => String(id))
+                    : selectedAssetIds[0]
+                      ? String(selectedAssetIds[0])
+                      : '';
+                  return (
+                    <div className={styles.assetInput}>
+                      <div className={styles.assetControls}>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple={isList}
+                          onChange={(event) => handleWorkflowTestAssetUpload(input.key, event.target.files, isList)}
+                        />
+                        {workflowTestAssetSpaceId && workflowTestSelectableAssets.length > 0 ? (
+                          <select
+                            value={selectValue}
+                            multiple={isList}
+                            onChange={(event) =>
+                              handleWorkflowTestAssetSelect(
+                                input.key,
+                                event.target.value,
+                                event.target.selectedOptions,
+                                isList,
+                              )
+                            }
+                          >
+                            {!isList && <option value="">-- 选择空间资产 --</option>}
+                            {workflowTestSelectableAssets.map((asset) => (
+                              <option key={asset.id} value={String(asset.id)}>
+                                #{asset.id} {asset.filename}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className={styles.hint}>上传图片会保存到空间并以 base64 发送</div>
+                        )}
+                      </div>
+                      {previewUrls.length > 0 && (
+                        <div className={styles.mediaPreview}>
+                          {previewUrls.map((url) =>
+                            isVideoUrl(url) ? (
+                              <video key={url} src={url} controls className={styles.previewItem} />
+                            ) : (
+                              <img key={url} src={url} alt="workflow-input" className={styles.previewItem} />
+                            ),
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : input.type === 'boolean' ? (
+                <input
+                  type="checkbox"
+                  checked={!!workflowTestInputs[input.key]}
+                  onChange={(event) => updateWorkflowTestInput(input.key, event.target.checked)}
+                />
+              ) : (
+                <textarea
+                  rows={2}
+                  value={workflowTestInputs[input.key] ?? ''}
+                  onChange={(event) => updateWorkflowTestInput(input.key, event.target.value)}
+                />
+              )}
+            </div>
+          ))}
+          <button className="btn btn--primary btn--sm" onClick={runWorkflowTest} disabled={workflowTestRunning || !startNode}>
+            {workflowTestRunning ? '测试中...' : '运行工作流测试'}
+          </button>
+          {workflowTestError && <div className={styles.validationError}>{workflowTestError}</div>}
+          {workflowTestResult && !workflowTestResult.ok && (
+            <div className={styles.validationError}>{workflowTestResult.error || '工作流执行失败'}</div>
+          )}
+          {workflowTestResult && (
+            <>
+              <pre className={styles.testOutput}>
+                {JSON.stringify(workflowTestResult.finalOutput || {}, null, 2)}
+              </pre>
+              {workflowTestMediaUrls.length > 0 && (
+                <div className={styles.mediaPreview}>
+                  {workflowTestMediaUrls.map((url) => {
+                    const isVideo =
+                      url.startsWith('data:video/') || /\.(mp4|webm|mov|mkv)(\?.*)?$/i.test(url);
+                    return isVideo ? (
+                      <video key={url} src={url} controls className={styles.previewItem} />
+                    ) : (
+                      <img key={url} src={url} alt="workflow-output" className={styles.previewItem} />
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </aside>
     </div>
   );

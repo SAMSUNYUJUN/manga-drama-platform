@@ -50,6 +50,9 @@ export enum AssetType {
   KEYFRAME_IMAGE = 'keyframe_image',
   STORYBOARD_VIDEO = 'storyboard_video',
   FINAL_VIDEO = 'final_video',
+  LIBRARY_IMAGE = 'library_image',
+  LIBRARY_VIDEO = 'library_video',
+  LIBRARY_FILE = 'library_file',
 }
 
 /**

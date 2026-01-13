@@ -10,12 +10,12 @@ export type WorkflowValueType =
   | 'number'
   | 'boolean'
   | 'json'
-  | 'asset_ref'
+  | 'image'
   | 'list<text>'
   | 'list<number>'
   | 'list<boolean>'
   | 'list<json>'
-  | 'list<asset_ref>';
+  | 'list<image>';
 
 export type WorkflowValue =
   | string
@@ -43,7 +43,8 @@ export interface WorkflowValidationIssue {
     | 'missing_required_input'
     | 'unreachable_nodes'
     | 'cycles_not_allowed'
-    | 'multiple_start_edges';
+    | 'multiple_start_edges'
+    | 'duplicate_output_key';
   message: string;
   nodeId?: string;
   edgeId?: string;
@@ -56,10 +57,31 @@ export interface WorkflowValidationResult {
   warnings: WorkflowValidationIssue[];
 }
 
+export interface WorkflowTestNodeResult {
+  nodeId: string;
+  nodeType: WorkflowNodeType | string;
+  inputs: Record<string, any>;
+  outputs: Record<string, any>;
+  rawOutputs?: any;
+  error?: string;
+  durationMs?: number;
+}
+
+export interface WorkflowTestResult {
+  ok: boolean;
+  endNodeId?: string;
+  finalOutput?: Record<string, any>;
+  nodeResults: WorkflowTestNodeResult[];
+  error?: string;
+  failedNodeId?: string;
+  durationMs: number;
+}
+
 export interface WorkflowTemplate {
   id: number;
   name: string;
   description?: string;
+  spaceId?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }

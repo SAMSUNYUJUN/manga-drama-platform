@@ -13,8 +13,8 @@ import type {
 
 const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; outputs: WorkflowVariable[] }> = {
   [WorkflowNodeType.START]: {
-    inputs: [],
-    outputs: [{ key: 'input', name: '输入文本', type: 'text', required: true }],
+    inputs: [{ key: 'input', name: '输入文本', type: 'text', required: true }],
+    outputs: [],
   },
   [WorkflowNodeType.END]: {
     inputs: [{ key: 'result', name: '最终输出', type: 'text', required: true }],
@@ -34,11 +34,11 @@ const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; 
   },
   [WorkflowNodeType.GENERATE_CHARACTER_IMAGES]: {
     inputs: [{ key: 'prompt', name: '角色提示', type: 'text', required: true }],
-    outputs: [{ key: 'images', name: '角色图片', type: 'list<asset_ref>', required: true }],
+    outputs: [{ key: 'images', name: '角色图片', type: 'list<image>', required: true }],
   },
   [WorkflowNodeType.HUMAN_REVIEW_ASSETS]: {
-    inputs: [{ key: 'assets', name: '候选资产', type: 'list<asset_ref>', required: true }],
-    outputs: [{ key: 'assets', name: '通过资产', type: 'list<asset_ref>', required: true }],
+    inputs: [{ key: 'assets', name: '候选资产', type: 'list<image>', required: true }],
+    outputs: [{ key: 'assets', name: '通过资产', type: 'list<image>', required: true }],
   },
   [WorkflowNodeType.HUMAN_BREAKPOINT]: {
     inputs: [{ key: 'candidates', name: '候选内容', type: 'list<text>', required: true }],
@@ -46,19 +46,19 @@ const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; 
   },
   [WorkflowNodeType.GENERATE_SCENE_IMAGE]: {
     inputs: [{ key: 'prompt', name: '场景提示', type: 'text', required: true }],
-    outputs: [{ key: 'image', name: '场景图', type: 'asset_ref', required: true }],
+    outputs: [{ key: 'image', name: '场景图', type: 'image', required: true }],
   },
   [WorkflowNodeType.GENERATE_KEYFRAMES]: {
     inputs: [{ key: 'prompt', name: '关键帧提示', type: 'text', required: true }],
-    outputs: [{ key: 'frames', name: '关键帧', type: 'list<asset_ref>', required: true }],
+    outputs: [{ key: 'frames', name: '关键帧', type: 'list<image>', required: true }],
   },
   [WorkflowNodeType.GENERATE_VIDEO]: {
     inputs: [{ key: 'prompt', name: '视频提示', type: 'text', required: true }],
-    outputs: [{ key: 'video', name: '视频', type: 'asset_ref', required: true }],
+    outputs: [{ key: 'video', name: '视频', type: 'image', required: true }],
   },
   [WorkflowNodeType.FINAL_COMPOSE]: {
-    inputs: [{ key: 'assets', name: '合成素材', type: 'list<asset_ref>', required: true }],
-    outputs: [{ key: 'final', name: '最终视频', type: 'asset_ref', required: true }],
+    inputs: [{ key: 'assets', name: '合成素材', type: 'list<image>', required: true }],
+    outputs: [{ key: 'final', name: '最终视频', type: 'image', required: true }],
   },
 };
 
@@ -100,8 +100,14 @@ export const ensureStartEndNodes = (nodes: WorkflowNode[]): WorkflowNode[] => {
 export const normalizeNodeVariables = (node: WorkflowNode): WorkflowNode => {
   const nodeType = (node.type || node.data?.nodeType || node.data?.label) as WorkflowNodeType;
   const defaults = DEFAULT_VARIABLES[nodeType];
-  const inputs = node.data?.inputs?.length ? node.data.inputs : defaults?.inputs || [];
-  const outputs = node.data?.outputs?.length ? node.data.outputs : defaults?.outputs || [];
+  let inputs = node.data?.inputs?.length ? node.data.inputs : defaults?.inputs || [];
+  let outputs = node.data?.outputs?.length ? node.data.outputs : defaults?.outputs || [];
+  if (nodeType === WorkflowNodeType.START) {
+    if (!inputs.length && outputs.length) {
+      inputs = outputs;
+    }
+    outputs = [];
+  }
   return {
     ...node,
     type: nodeType,
@@ -119,7 +125,10 @@ export const normalizeEdges = (nodes: WorkflowNode[], edges: WorkflowEdge[]): Wo
   return edges.map((edge) => {
     const source = nodeMap.get(edge.source);
     const target = nodeMap.get(edge.target);
-    const sourceKey = edge.sourceOutputKey || source?.data?.outputs?.[0]?.key;
+    const sourceKey =
+      edge.sourceOutputKey ||
+      source?.data?.outputs?.[0]?.key ||
+      (source?.type === WorkflowNodeType.START ? source?.data?.inputs?.[0]?.key : undefined);
     const targetKey = edge.targetInputKey || target?.data?.inputs?.[0]?.key;
     return {
       ...edge,

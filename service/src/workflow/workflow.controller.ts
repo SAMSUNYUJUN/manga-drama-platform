@@ -7,6 +7,8 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
+  Patch,
   Body,
   Param,
   ParseIntPipe,
@@ -29,6 +31,8 @@ import {
   ValidateWorkflowDto,
   HumanSelectDto,
   NodeTestDto,
+  WorkflowTestDto,
+  UpdateWorkflowTemplateDto,
 } from './dto';
 import { ApiResponse } from '@shared/types';
 import { JwtAuthGuard } from '../auth/guards';
@@ -79,6 +83,23 @@ export class WorkflowController {
   ): Promise<ApiResponse<any>> {
     const data = await this.templateService.getTemplate(id);
     return { success: true, data, message: 'Workflow template retrieved' };
+  }
+
+  @Patch('workflows/templates/:id')
+  async updateTemplate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateWorkflowTemplateDto,
+  ): Promise<ApiResponse<any>> {
+    const data = await this.templateService.updateTemplate(id, dto);
+    return { success: true, data, message: 'Workflow template updated' };
+  }
+
+  @Delete('workflows/templates/:id')
+  async deleteTemplate(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<ApiResponse<{ id: number }>> {
+    await this.templateService.deleteTemplate(id);
+    return { success: true, data: { id }, message: 'Workflow template deleted' };
   }
 
   @Post('workflows/templates/:id/versions')
@@ -269,5 +290,18 @@ export class WorkflowController {
   ): Promise<ApiResponse<any>> {
     const data = await this.runService.testNode(dto);
     return { success: true, data, message: 'Node test completed' };
+  }
+
+  @Post('workflows/test')
+  async workflowTest(
+    @Body() dto: WorkflowTestDto,
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<any>> {
+    const validation = this.validationService.validate(dto.nodes || [], dto.edges || []);
+    if (!validation.ok) {
+      throw new BadRequestException({ message: 'Workflow validation failed', errors: validation.errors });
+    }
+    const data = await this.runService.testWorkflow(dto, user);
+    return { success: true, data, message: 'Workflow test completed' };
   }
 }

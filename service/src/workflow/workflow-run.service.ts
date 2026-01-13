@@ -16,6 +16,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, In } from 'typeorm';
 import {
   WorkflowRun,
+  WorkflowTemplate,
   WorkflowTemplateVersion,
   NodeRun,
   Task,
@@ -31,6 +32,7 @@ import {
   TaskStatus,
   TaskStage,
   UserRole,
+  ProviderType,
   WorkflowNodeType,
   WorkflowRunStatus,
 } from '@shared/constants';
@@ -39,12 +41,14 @@ import { PromptService } from '../prompt/prompt.service';
 import type { IStorageService } from '../storage/storage.interface';
 import { Inject } from '@nestjs/common';
 import { User } from '../database/entities';
-import { StartWorkflowRunDto, ReviewDecisionDto, ReviewUploadDto, HumanSelectDto, CreateWorkflowRunDto, NodeTestDto } from './dto';
+import { StartWorkflowRunDto, ReviewDecisionDto, ReviewUploadDto, HumanSelectDto, CreateWorkflowRunDto, NodeTestDto, WorkflowTestDto } from './dto';
 import axios from 'axios';
+import * as path from 'path';
 import { WorkflowValidationService } from './workflow-validation.service';
 import { normalizeWorkflowVersion } from './workflow-utils';
 import { TrashService } from '../asset/trash.service';
 import { NodeToolService } from '../node-tool/node-tool.service';
+import type { WorkflowTestNodeResult, WorkflowTestResult } from '@shared/types/workflow.types';
 
 const TASK_STAGE_ORDER: TaskStage[] = [
   TaskStage.SCRIPT_UPLOADED,
@@ -81,6 +85,7 @@ const STAGE_NODE_MAP: Record<TaskStage, WorkflowNodeType[]> = {
 @Injectable()
 export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
   private readonly processingRuns = new Set<number>();
+  private readonly workflowSpaceCache = new Map<number, number | null>();
   private poller: NodeJS.Timeout | null = null;
 
   constructor(
@@ -93,6 +98,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     @Inject('IStorageService') private readonly storageService: IStorageService,
     @InjectRepository(WorkflowRun)
     private runRepository: Repository<WorkflowRun>,
+    @InjectRepository(WorkflowTemplate)
+    private templateRepository: Repository<WorkflowTemplate>,
     @InjectRepository(WorkflowTemplateVersion)
     private versionRepository: Repository<WorkflowTemplateVersion>,
     @InjectRepository(NodeRun)
@@ -318,7 +325,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     const { task, version } = await this.ensureTaskAccess(run.taskId, run.taskVersionId, user);
 
     const assetType = (dto.assetType as AssetType) || AssetType.CHARACTER_DESIGN;
-    const folder = this.buildAssetFolder(task.userId, task.id, version.id, assetType);
+    const spaceId = await this.getWorkflowSpaceId(run);
+    const folder = this.buildAssetFolder(task.userId, task.id, version.id, assetType, spaceId);
     const filename = this.buildFilename('review', file.originalname);
     const url = await this.storageService.uploadBuffer(file.buffer, filename, {
       folder,
@@ -330,6 +338,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       this.assetRepository.create({
         taskId: task.id,
         versionId: version.id,
+        spaceId,
         type: assetType,
         status: AssetStatus.ACTIVE,
         url,
@@ -578,6 +587,240 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async testWorkflow(dto: WorkflowTestDto, user: User): Promise<WorkflowTestResult> {
+    const startedAt = Date.now();
+    const normalized = normalizeWorkflowVersion(dto.nodes || [], dto.edges || []);
+    const nodes = normalized.nodes;
+    const edges = normalized.edges;
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+    const outputsMap = new Map<string, Record<string, any>>();
+    const nodeResults: WorkflowTestNodeResult[] = [];
+    const order = this.resolveNodeOrder(nodes, edges);
+    const startNode = nodes.find((node) => node.type === WorkflowNodeType.START);
+    const endNode = nodes.find((node) => node.type === WorkflowNodeType.END);
+    let testSpaceId: number | null = null;
+
+    if (dto.templateId) {
+      const template = await this.templateRepository.findOne({ where: { id: dto.templateId } });
+      testSpaceId = template?.spaceId ?? null;
+    }
+
+    if (startNode) {
+      const startInputs = this.applyDefaultInputs(startNode, dto.startInputs || {});
+      outputsMap.set(startNode.id, startInputs);
+      nodeResults.push({
+        nodeId: startNode.id,
+        nodeType: startNode.type,
+        inputs: startInputs,
+        outputs: startInputs,
+        durationMs: 0,
+      });
+    }
+
+    for (const nodeId of order) {
+      const node = nodeMap.get(nodeId);
+      if (!node || node.type === WorkflowNodeType.START) continue;
+      const inputs = this.resolveTestInputs(node, edges, nodeMap, outputsMap);
+      let outputs: Record<string, any> = {};
+      let error: string | undefined;
+      let durationMs = 0;
+
+      if (node.type === WorkflowNodeType.HUMAN_BREAKPOINT) {
+        outputs = this.resolveBreakpointOutput(node, inputs);
+      } else if (node.type === WorkflowNodeType.END) {
+        outputs = this.buildOutputVariables(node, inputs);
+      } else {
+        const result = await this.runWorkflowNodeTest(node, inputs);
+        durationMs = result.durationMs;
+        if (result.error) {
+          error = result.error;
+        }
+        let assetUrls: string[] | undefined;
+        if (this.hasAssetRefOutputs(node)) {
+          const mediaUrls = this.collectTestMediaUrls(result.outputs);
+          if (mediaUrls.length) {
+            const assets = await this.saveTestMediaAssets(mediaUrls, user, testSpaceId, dto.templateId);
+            assetUrls = assets.map((asset) => asset.url);
+          }
+        }
+        const primaryOutput = this.getPrimaryOutputValue(node, result.outputs);
+        outputs = this.buildOutputVariables(node, primaryOutput, undefined, assetUrls);
+        nodeResults.push({
+          nodeId: node.id,
+          nodeType: node.type,
+          inputs,
+          outputs,
+          rawOutputs: result.outputs,
+          error,
+          durationMs,
+        });
+      }
+
+      if (node.type === WorkflowNodeType.HUMAN_BREAKPOINT || node.type === WorkflowNodeType.END) {
+        nodeResults.push({
+          nodeId: node.id,
+          nodeType: node.type,
+          inputs,
+          outputs,
+          durationMs,
+        });
+      }
+
+      outputsMap.set(node.id, outputs);
+      if (error) {
+        return {
+          ok: false,
+          endNodeId: endNode?.id,
+          finalOutput: endNode ? outputsMap.get(endNode.id) : outputs,
+          nodeResults,
+          error,
+          failedNodeId: node.id,
+          durationMs: Date.now() - startedAt,
+        };
+      }
+    }
+
+    const finalOutput = endNode ? outputsMap.get(endNode.id) : outputsMap.get(order[order.length - 1] || '');
+    return {
+      ok: true,
+      endNodeId: endNode?.id,
+      finalOutput: finalOutput || {},
+      nodeResults,
+      durationMs: Date.now() - startedAt,
+    };
+  }
+
+  private resolveTestInputs(
+    node: any,
+    edges: any[],
+    nodeMap: Map<string, any>,
+    outputsMap: Map<string, Record<string, any>>,
+  ) {
+    const incomingEdges = edges.filter((edge) => edge.target === node.id);
+    if (!incomingEdges.length) {
+      return this.applyDefaultInputs(node, {});
+    }
+    const variables: Record<string, any> = {};
+    incomingEdges.forEach((edge) => {
+      const sourceNode = nodeMap.get(edge.source);
+      if (!sourceNode) return;
+      const fallbackKey =
+        sourceNode.type === WorkflowNodeType.START
+          ? sourceNode.data?.inputs?.[0]?.key
+          : sourceNode.data?.outputs?.[0]?.key;
+      const sourceKey = edge.sourceOutputKey || fallbackKey;
+      const sourceOutputs = outputsMap.get(edge.source) || {};
+      let value = sourceKey ? sourceOutputs[sourceKey] : undefined;
+      if (edge.transform === 'stringify' && value !== undefined) {
+        value = JSON.stringify(value);
+      }
+      if (edge.transform === 'parse_json' && typeof value === 'string') {
+        try {
+          value = JSON.parse(value);
+        } catch {
+          value = undefined;
+        }
+      }
+      if (value !== undefined && edge.targetInputKey) {
+        variables[edge.targetInputKey] = value;
+      }
+    });
+    return this.applyDefaultInputs(node, variables);
+  }
+
+  private resolveBreakpointOutput(node: any, inputs: Record<string, any>) {
+    const config = node.data?.config || {};
+    const selectionMode = config.selectionMode || (config.multiSelect ? 'multiple' : 'single');
+    const inputKey = node.data?.inputs?.[0]?.key;
+    const value = inputKey ? inputs[inputKey] : undefined;
+    if (selectionMode === 'multiple') {
+      return this.buildOutputVariables(node, Array.isArray(value) ? value : value !== undefined ? [value] : []);
+    }
+    const selected = Array.isArray(value) ? value[0] : value;
+    return this.buildOutputVariables(node, selected);
+  }
+
+  private getPrimaryOutputValue(node: any, outputs: any) {
+    if (!outputs) return outputs;
+    const definedOutputs = node.data?.outputs || [];
+    for (const output of definedOutputs) {
+      if (output.key in outputs) {
+        return outputs[output.key];
+      }
+    }
+    if (typeof outputs.outputText === 'string') return outputs.outputText;
+    if (Array.isArray(outputs.mediaUrls)) return outputs.mediaUrls;
+    if (Array.isArray(outputs.images)) return outputs.images;
+    if (Array.isArray(outputs.videos)) return outputs.videos;
+    if (typeof outputs.output === 'string' || Array.isArray(outputs.output)) return outputs.output;
+    return outputs;
+  }
+
+  private async runWorkflowNodeTest(node: any, inputs: Record<string, any>) {
+    const start = Date.now();
+    const config = node.data?.config || {};
+    try {
+      if (node.type === WorkflowNodeType.LLM_TOOL) {
+        let promptTemplateVersionId = config.promptTemplateVersionId;
+        let model = config.model;
+        let tool: any;
+        if ((promptTemplateVersionId === undefined || model === undefined) && node.data?.toolId) {
+          tool = await this.nodeToolService.getTool(node.data.toolId);
+          promptTemplateVersionId = promptTemplateVersionId ?? tool.promptTemplateVersionId ?? undefined;
+          model = model ?? tool.model ?? undefined;
+        }
+        if (!promptTemplateVersionId) {
+          throw new BadRequestException('promptTemplateVersionId is required for LLM tool test');
+        }
+        const renderVariables = this.normalizePromptVariables(inputs);
+        const rendered = await this.promptService.renderPrompt({
+          templateVersionId: promptTemplateVersionId,
+          variables: renderVariables,
+        });
+        const providerType = await this.resolveToolProviderType(model, node, tool);
+        if (providerType === ProviderType.IMAGE || providerType === ProviderType.VIDEO) {
+          const inputAssetUrls = await this.collectAssetUrlsFromInputs(inputs);
+          const assetInputs = (node.data?.inputs || tool?.inputs || []).filter(
+            (input: any) => this.isImageValueType(input.type) || this.isImageListType(input.type),
+          );
+          const requiresAssetInput = assetInputs.some((input: any) => input.required);
+          if (requiresAssetInput && !inputAssetUrls.length) {
+            throw new BadRequestException('缺少图片输入');
+          }
+          const inputImages = await this.prepareInputImagesForModel(inputAssetUrls, model, { forceDataUri: true });
+          const media =
+            providerType === ProviderType.IMAGE
+              ? await this.aiService.generateImage(rendered.rendered, model, inputImages)
+              : await this.aiService.generateVideo(rendered.rendered, model, inputImages);
+          const urls = media.map((item) =>
+            item.url
+              ? item.url
+              : item.data
+                ? `data:${item.mimeType || (providerType === ProviderType.IMAGE ? 'image/png' : 'video/mp4')};base64,${item.data.toString('base64')}`
+                : '',
+          );
+          return {
+            outputs: providerType === ProviderType.IMAGE ? { images: urls, renderedPrompt: rendered.rendered } : { videos: urls, renderedPrompt: rendered.rendered },
+            durationMs: Date.now() - start,
+          };
+        }
+        const outputText = await this.aiService.generateText(rendered.rendered, model);
+        return {
+          outputs: { output: outputText, renderedPrompt: rendered.rendered, missingVariables: rendered.missingVariables },
+          durationMs: Date.now() - start,
+        };
+      }
+      const result = await this.testNode({ nodeType: node.type, config, inputs });
+      return { outputs: result.outputs, error: result.error, durationMs: result.durationMs };
+    } catch (error: any) {
+      return {
+        outputs: null,
+        error: this.formatWorkflowTestError(error, 'Workflow node test failed'),
+        durationMs: Date.now() - start,
+      };
+    }
+  }
+
   private async resumePendingRuns() {
     const runs = await this.runRepository.find({
       where: { status: WorkflowRunStatus.RUNNING },
@@ -649,6 +892,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       await this.releaseLock(run.taskVersionId);
     } finally {
       this.processingRuns.delete(runId);
+      this.workflowSpaceCache.delete(runId);
     }
   }
 
@@ -685,8 +929,9 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           const toolConfig = node.data?.config || {};
           let promptTemplateVersionId = toolConfig.promptTemplateVersionId;
           let model = toolConfig.model;
+          let tool: any;
           if ((promptTemplateVersionId === undefined || model === undefined) && node.data?.toolId) {
-            const tool = await this.nodeToolService.getTool(node.data.toolId);
+            tool = await this.nodeToolService.getTool(node.data.toolId);
             promptTemplateVersionId = promptTemplateVersionId ?? tool.promptTemplateVersionId ?? undefined;
             model = model ?? tool.model ?? undefined;
           }
@@ -698,11 +943,36 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             templateVersionId: promptTemplateVersionId,
             variables: renderVariables,
           });
-          const outputText = await this.aiService.generateText(rendered.rendered, model);
-          nodeRun.output = {
-            variables: this.buildOutputVariables(node, outputText),
-            logs: [],
-          };
+          const providerType = await this.resolveToolProviderType(model, node, tool);
+          if (providerType === ProviderType.IMAGE || providerType === ProviderType.VIDEO) {
+            const inputAssetUrls = await this.collectAssetUrlsFromInputs(inputVariables);
+            const inputImages = await this.prepareInputImagesForModel(inputAssetUrls, model);
+            const count = toolConfig.outputCount || 1;
+            const assets = await this.generateMediaAssets(
+              run,
+              providerType === ProviderType.IMAGE ? AssetType.SCENE_IMAGE : AssetType.STORYBOARD_VIDEO,
+              rendered.rendered,
+              count,
+              providerType === ProviderType.IMAGE ? 'image' : 'video',
+              undefined,
+              model,
+              inputImages,
+            );
+            const assetIds = assets.map((asset) => asset.id);
+            const assetUrls = assets.map((asset) => asset.url);
+            nodeRun.output = {
+              assetIds,
+              providerTaskId: null,
+              logs: [],
+              variables: this.buildOutputVariables(node, assetUrls, assetIds, assetUrls),
+            };
+          } else {
+            const outputText = await this.aiService.generateText(rendered.rendered, model);
+            nodeRun.output = {
+              variables: this.buildOutputVariables(node, outputText),
+              logs: [],
+            };
+          }
           nodeRun.status = NodeRunStatus.SUCCEEDED;
           nodeRun.endedAt = new Date();
           await this.nodeRunRepository.save(nodeRun);
@@ -757,11 +1027,13 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             undefined,
             config.model,
           );
+          const assetIds = assets.map((asset) => asset.id);
+          const assetUrls = assets.map((asset) => asset.url);
           nodeRun.output = {
-            assetIds: assets.map((asset) => asset.id),
+            assetIds,
             providerTaskId: null,
             logs: [],
-            variables: this.buildOutputVariables(node, assets.map((asset) => asset.id), assets.map((asset) => asset.id)),
+            variables: this.buildOutputVariables(node, assetUrls, assetIds, assetUrls),
           };
           nodeRun.status = NodeRunStatus.SUCCEEDED;
           nodeRun.endedAt = new Date();
@@ -814,11 +1086,13 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             undefined,
             config.model,
           );
+          const assetIds = assets.map((asset) => asset.id);
+          const assetUrls = assets.map((asset) => asset.url);
           nodeRun.output = {
-            assetIds: assets.map((asset) => asset.id),
+            assetIds,
             providerTaskId: null,
             logs: [],
-            variables: this.buildOutputVariables(node, assets[0]?.id, assets.map((asset) => asset.id)),
+            variables: this.buildOutputVariables(node, assetUrls[0], assetIds, assetUrls),
           };
           nodeRun.status = NodeRunStatus.SUCCEEDED;
           nodeRun.endedAt = new Date();
@@ -838,11 +1112,13 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             undefined,
             config.model,
           );
+          const assetIds = assets.map((asset) => asset.id);
+          const assetUrls = assets.map((asset) => asset.url);
           nodeRun.output = {
-            assetIds: assets.map((asset) => asset.id),
+            assetIds,
             providerTaskId: null,
             logs: [],
-            variables: this.buildOutputVariables(node, assets.map((asset) => asset.id), assets.map((asset) => asset.id)),
+            variables: this.buildOutputVariables(node, assetUrls, assetIds, assetUrls),
           };
           nodeRun.status = NodeRunStatus.SUCCEEDED;
           nodeRun.endedAt = new Date();
@@ -894,7 +1170,9 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           return nodeRun;
         }
         case WorkflowNodeType.END: {
-          nodeRun.output = { variables: this.buildOutputVariables(node, inputVariables) };
+          const outputVariables = this.buildOutputVariables(node, inputVariables);
+          const persisted = await this.persistEndNodeAssets(run, node, outputVariables);
+          nodeRun.output = { variables: persisted.outputs, assetIds: persisted.assetIds };
           nodeRun.status = NodeRunStatus.SUCCEEDED;
           nodeRun.endedAt = new Date();
           await this.nodeRunRepository.save(nodeRun);
@@ -1070,6 +1348,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     node: any,
     value?: any,
     assetIds?: number[],
+    assetUrls?: string[],
   ): Record<string, any> {
     const outputs = node.data?.outputs || [];
     if (!outputs.length) {
@@ -1085,20 +1364,44 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       const fallback = index === 0 ? value : undefined;
-      variables[output.key] = this.coerceValueForType(output.type, fallback, assetIds);
+      variables[output.key] = this.coerceValueForType(output.type, fallback, assetIds, assetUrls);
     });
     return variables;
   }
 
-  private coerceValueForType(type: string, value: any, assetIds?: number[]) {
+  private coerceValueForType(
+    type: string,
+    value: any,
+    assetIds?: number[],
+    assetUrls?: string[],
+  ) {
+    if (type === 'list<image>' || type === 'list<asset_ref>') {
+      if (assetUrls && assetUrls.length) return assetUrls;
+      if (assetIds && assetIds.length) return assetIds;
+      if (value && typeof value === 'object' && Array.isArray((value as any).mediaUrls)) {
+        return (value as any).mediaUrls;
+      }
+      if (value && typeof value === 'object' && Array.isArray((value as any).images)) {
+        return (value as any).images;
+      }
+      if (Array.isArray(value)) return value;
+      return value !== undefined ? [value] : [];
+    }
     if (type.startsWith('list<')) {
       if (Array.isArray(value)) return value;
       if (assetIds) return assetIds;
       return value !== undefined ? [value] : [];
     }
-    if (type === 'asset_ref') {
+    if (type === 'image' || type === 'asset_ref') {
+      if (assetUrls && assetUrls.length) return assetUrls[0];
       if (typeof value === 'number') return value;
       if (Array.isArray(assetIds) && assetIds.length) return assetIds[0];
+      if (Array.isArray(value)) return value[0];
+      if (value && typeof value === 'object') {
+        if (typeof (value as any).url === 'string') return (value as any).url;
+        if (Array.isArray((value as any).mediaUrls)) return (value as any).mediaUrls[0];
+        if (Array.isArray((value as any).images)) return (value as any).images[0];
+      }
       return value;
     }
     if (type === 'text' && value !== undefined && typeof value !== 'string') {
@@ -1128,6 +1431,421 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       normalized[key] = JSON.stringify(value);
     });
     return normalized;
+  }
+
+  private isImageValueType(type?: string) {
+    return type === 'image' || type === 'asset_ref';
+  }
+
+  private isImageListType(type?: string) {
+    return type === 'list<image>' || type === 'list<asset_ref>';
+  }
+
+  private resolveToolOutputs(node: any, tool?: any) {
+    if (node?.data?.outputs?.length) return node.data.outputs;
+    if (tool?.outputs?.length) return tool.outputs;
+    return [];
+  }
+
+  private async resolveToolProviderType(model: string | undefined, node: any, tool?: any) {
+    const resolved = model ? await this.aiService.resolveProviderType(model) : null;
+    if (resolved && resolved !== ProviderType.LLM) {
+      return resolved;
+    }
+    const outputs = this.resolveToolOutputs(node, tool);
+    if (outputs.some((output: any) => this.isImageValueType(output.type) || this.isImageListType(output.type))) {
+      return ProviderType.IMAGE;
+    }
+    return resolved ?? ProviderType.LLM;
+  }
+
+  private async collectAssetUrlsFromInputs(values: Record<string, any>) {
+    const urls: string[] = [];
+    const ids: number[] = [];
+    const pushUrl = (candidate: any) => {
+      if (typeof candidate === 'string' && this.isAssetUrl(candidate)) {
+        urls.push(candidate);
+      }
+    };
+    Object.values(values || {}).forEach((value) => {
+      if (typeof value === 'number') {
+        ids.push(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((item) => {
+          if (typeof item === 'number') ids.push(item);
+          if (typeof item === 'string') pushUrl(item);
+          if (item && typeof item === 'object') {
+            const url = item.image_url?.url || item.video_url?.url || item.url;
+            pushUrl(url);
+          }
+        });
+        return;
+      }
+      if (typeof value === 'string') {
+        pushUrl(value);
+        return;
+      }
+      if (value && typeof value === 'object') {
+        const url = value.image_url?.url || value.video_url?.url || value.url;
+        pushUrl(url);
+      }
+    });
+
+    if (ids.length) {
+      const assets = await this.assetRepository.find({ where: { id: In(ids) } });
+      assets.forEach((asset) => urls.push(asset.url));
+    }
+    return urls;
+  }
+
+  private isAssetUrl(value: string) {
+    return /^(https?:\/\/|data:image\/|data:video\/)/i.test(value);
+  }
+
+  private hasAssetRefOutputs(node: any) {
+    const outputs = node.data?.outputs || [];
+    return outputs.some(
+      (output: any) => this.isImageValueType(output.type) || this.isImageListType(output.type),
+    );
+  }
+
+  private collectTestMediaUrls(outputs: any) {
+    const urls: string[] = [];
+    const pushUrl = (value: any) => {
+      if (typeof value === 'string' && this.isAssetUrl(value)) {
+        urls.push(value);
+      }
+    };
+    const pushFromValue = (value: any) => {
+      if (typeof value === 'string') {
+        pushUrl(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((item) => {
+          if (typeof item === 'string') pushUrl(item);
+        });
+      }
+    };
+    if (outputs && typeof outputs === 'object') {
+      Object.values(outputs).forEach((value) => pushFromValue(value));
+    }
+    return Array.from(new Set(urls));
+  }
+
+  private async saveTestMediaAssets(
+    urls: string[],
+    user: User,
+    spaceId?: number | null,
+    templateId?: number,
+  ) {
+    const folder = this.buildWorkflowTestFolder(user.id, spaceId, templateId);
+    const assets: Asset[] = [];
+    for (const url of urls) {
+      const parsed = this.parseDataUri(url);
+      const mediaType = this.inferMediaType(url, parsed?.mimeType);
+      const ext = this.inferExtension(mediaType, parsed?.mimeType, url);
+      const filename = `test_${Date.now()}_${Math.random().toString(16).slice(2, 8)}.${ext}`;
+      const mimeType = parsed?.mimeType || this.guessMimeType(mediaType, ext);
+      let storedUrl: string;
+      let filesize: number | undefined;
+      if (parsed) {
+        storedUrl = await this.storageService.uploadBuffer(parsed.buffer, filename, {
+          folder,
+          contentType: mimeType,
+        });
+        filesize = parsed.buffer.length;
+      } else {
+        storedUrl = await this.storageService.uploadRemoteFile(url, filename, {
+          folder,
+          contentType: mimeType,
+        });
+      }
+      const assetType = mediaType === 'video' ? AssetType.LIBRARY_VIDEO : AssetType.LIBRARY_IMAGE;
+      const asset = await this.assetRepository.save(
+        this.assetRepository.create({
+          taskId: null,
+          versionId: null,
+          spaceId: spaceId ?? null,
+          type: assetType,
+          status: AssetStatus.ACTIVE,
+          url: storedUrl,
+          filename,
+          filesize,
+          mimeType,
+          metadataJson: JSON.stringify({
+            sourceUrl: url,
+            workflowTest: true,
+            templateId: templateId ?? null,
+          }),
+        }),
+      );
+      assets.push(asset);
+    }
+    return assets;
+  }
+
+  private async persistEndNodeAssets(
+    run: WorkflowRun,
+    node: any,
+    outputs: Record<string, any>,
+  ): Promise<{ outputs: Record<string, any>; assetIds: number[] }> {
+    const outputDefs = node.data?.outputs || [];
+    const imageDefs = outputDefs.filter(
+      (output: any) => this.isImageValueType(output.type) || this.isImageListType(output.type),
+    );
+    if (!imageDefs.length) {
+      return { outputs, assetIds: [] };
+    }
+
+    const outputItems = new Map<string, Array<{ assetId?: number; url?: string }>>();
+    const assetIds = new Set<number>();
+    const urls = new Set<string>();
+
+    const pushItem = (key: string, item: any) => {
+      if (typeof item === 'number') {
+        assetIds.add(item);
+        outputItems.set(key, [...(outputItems.get(key) || []), { assetId: item }]);
+        return;
+      }
+      if (typeof item === 'string') {
+        if (this.isAssetUrl(item)) {
+          urls.add(item);
+          outputItems.set(key, [...(outputItems.get(key) || []), { url: item }]);
+          return;
+        }
+        const parsed = Number(item);
+        if (Number.isFinite(parsed)) {
+          assetIds.add(parsed);
+          outputItems.set(key, [...(outputItems.get(key) || []), { assetId: parsed }]);
+        }
+        return;
+      }
+      if (item && typeof item === 'object') {
+        const url = item.image_url?.url || item.url;
+        if (typeof url === 'string' && this.isAssetUrl(url)) {
+          urls.add(url);
+          outputItems.set(key, [...(outputItems.get(key) || []), { url }]);
+        }
+      }
+    };
+
+    imageDefs.forEach((output: any) => {
+      const value = outputs?.[output.key];
+      if (value === undefined || value === null) return;
+      if (Array.isArray(value)) {
+        value.forEach((item) => pushItem(output.key, item));
+      } else {
+        pushItem(output.key, value);
+      }
+    });
+
+    if (!outputItems.size) {
+      return { outputs, assetIds: [] };
+    }
+
+    const assetsById = assetIds.size
+      ? await this.assetRepository.find({ where: { id: In(Array.from(assetIds)) } })
+      : [];
+    const assetById = new Map(assetsById.map((asset) => [asset.id, asset]));
+    const assetsByUrl = urls.size
+      ? await this.assetRepository.find({ where: { url: In(Array.from(urls)) } })
+      : [];
+    const assetByUrl = new Map(assetsByUrl.map((asset) => [asset.url, asset]));
+
+    const spaceId = await this.getWorkflowSpaceId(run);
+    const savedByUrl = new Map<string, Asset>();
+    const resolvedOutputs = { ...outputs };
+    const savedAssetIds: number[] = [];
+
+    for (const output of imageDefs) {
+      const items = outputItems.get(output.key) || [];
+      if (!items.length) continue;
+      const resolvedUrls: string[] = [];
+      for (const item of items) {
+        if (item.assetId !== undefined) {
+          const asset = assetById.get(item.assetId);
+          if (!asset) continue;
+          if (this.inferMediaType(asset.url, asset.mimeType) !== 'image') continue;
+          if (spaceId && asset.spaceId !== spaceId) {
+            const saved = await this.saveOutputImageAsset(run, asset.url, {
+              sourceAssetId: asset.id,
+              sourceUrl: asset.url,
+              nodeId: node.id,
+              outputKey: output.key,
+            });
+            resolvedUrls.push(saved.url);
+            savedAssetIds.push(saved.id);
+            continue;
+          }
+          resolvedUrls.push(asset.url);
+          savedAssetIds.push(asset.id);
+          continue;
+        }
+        if (item.url) {
+          if (this.inferMediaType(item.url) !== 'image') continue;
+          const existing = assetByUrl.get(item.url);
+          if (existing && (!spaceId || existing.spaceId === spaceId)) {
+            resolvedUrls.push(existing.url);
+            savedAssetIds.push(existing.id);
+            continue;
+          }
+          const cached = savedByUrl.get(item.url);
+          if (cached) {
+            resolvedUrls.push(cached.url);
+            savedAssetIds.push(cached.id);
+            continue;
+          }
+          const saved = await this.saveOutputImageAsset(run, item.url, {
+            sourceUrl: item.url,
+            nodeId: node.id,
+            outputKey: output.key,
+          });
+          savedByUrl.set(item.url, saved);
+          resolvedUrls.push(saved.url);
+          savedAssetIds.push(saved.id);
+        }
+      }
+      if (resolvedUrls.length) {
+        resolvedOutputs[output.key] = this.isImageListType(output.type) ? resolvedUrls : resolvedUrls[0];
+      }
+    }
+
+    return { outputs: resolvedOutputs, assetIds: savedAssetIds };
+  }
+
+  private async saveOutputImageAsset(
+    run: WorkflowRun,
+    sourceUrl: string,
+    metadata: Record<string, any>,
+  ): Promise<Asset> {
+    const parsed = this.parseDataUri(sourceUrl);
+    if (parsed) {
+      if (!parsed.mimeType.startsWith('image/')) {
+        throw new BadRequestException('仅支持图片作为输出资产');
+      }
+      return await this.saveMediaResult(
+        run,
+        AssetType.LIBRARY_IMAGE,
+        { data: parsed.buffer, mimeType: parsed.mimeType },
+        'image',
+        metadata,
+      );
+    }
+    const ext = this.inferExtension('image', undefined, sourceUrl);
+    const mimeType = this.guessMimeType('image', ext);
+    return await this.saveMediaResult(
+      run,
+      AssetType.LIBRARY_IMAGE,
+      { url: sourceUrl, mimeType },
+      'image',
+      metadata,
+    );
+  }
+
+  private buildWorkflowTestFolder(userId: number, spaceId?: number | null, templateId?: number) {
+    const suffix = templateId ? `template-${templateId}` : 'adhoc';
+    if (spaceId) {
+      return `users/${userId}/spaces/${spaceId}/workflow-tests/${suffix}`;
+    }
+    return `users/${userId}/workflow-tests/${suffix}`;
+  }
+
+  private parseDataUri(url: string) {
+    if (!url.startsWith('data:')) return null;
+    const match = url.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) return null;
+    const mimeType = match[1];
+    const buffer = Buffer.from(match[2], 'base64');
+    return { mimeType, buffer };
+  }
+
+  private inferMediaType(url: string, mimeType?: string): 'image' | 'video' {
+    if (mimeType?.startsWith('video/')) return 'video';
+    if (mimeType?.startsWith('image/')) return 'image';
+    if (/\.mp4$|\.webm$|\.mov$|\.mkv$/i.test(url)) return 'video';
+    return 'image';
+  }
+
+  private inferExtension(mediaType: 'image' | 'video', mimeType?: string, url?: string) {
+    if (mimeType) {
+      const ext = mimeType.split('/')[1];
+      if (ext) return ext.replace('+xml', '');
+    }
+    if (url) {
+      const ext = path.extname(url.split('?')[0]).replace('.', '');
+      if (ext) return ext;
+    }
+    return mediaType === 'video' ? 'mp4' : 'png';
+  }
+
+  private guessMimeType(mediaType: 'image' | 'video', ext?: string) {
+    if (ext) {
+      const normalized = ext.toLowerCase();
+      if (normalized === 'jpg' || normalized === 'jpeg') return 'image/jpeg';
+      if (normalized === 'png') return 'image/png';
+      if (normalized === 'webp') return 'image/webp';
+      if (normalized === 'mp4') return 'video/mp4';
+      if (normalized === 'webm') return 'video/webm';
+    }
+    return mediaType === 'video' ? 'video/mp4' : 'image/png';
+  }
+
+  private async prepareInputImagesForModel(
+    urls: string[],
+    model?: string,
+    options?: { forceDataUri?: boolean },
+  ) {
+    if (!urls.length) return urls;
+    const useDataUri = options?.forceDataUri || this.isNanoBananaModel(model);
+    if (!useDataUri) return urls;
+    if (this.isNanoBananaModel(model) && urls.length > 3) {
+      throw new BadRequestException('最多支持3张图片');
+    }
+    const dataUris = await Promise.all(urls.map((url) => this.toImageDataUri(url)));
+    return dataUris;
+  }
+
+  private formatWorkflowTestError(error: any, fallback: string) {
+    if (!error) return fallback;
+    const responseData = error?.response?.data;
+    const responseMessage =
+      responseData?.error?.message ||
+      responseData?.message ||
+      (typeof responseData === 'string' ? responseData : undefined);
+    const message = responseMessage || error?.message || fallback;
+    const status = error?.response?.status;
+    const code = error?.code;
+    const details = [status ? `status=${status}` : '', code ? `code=${code}` : '']
+      .filter(Boolean)
+      .join(' ');
+    return details ? `${message} (${details})` : message;
+  }
+
+  private isNanoBananaModel(model?: string) {
+    if (!model) return false;
+    const key = model.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return key === 'nanobanana';
+  }
+
+  private async toImageDataUri(url: string) {
+    if (url.startsWith('data:image/')) return url;
+    if (url.startsWith('data:')) {
+      throw new BadRequestException('仅支持图片作为输入');
+    }
+    const response = await axios.get<ArrayBuffer>(url, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+    });
+    const contentType =
+      (response.headers['content-type'] as string | undefined) || 'image/png';
+    if (!contentType.startsWith('image/')) {
+      throw new BadRequestException('仅支持图片作为输入');
+    }
+    const base64 = Buffer.from(response.data).toString('base64');
+    return `data:${contentType};base64,${base64}`;
   }
 
   private async getInputAssets(runId: number): Promise<Asset[]> {
@@ -1164,13 +1882,14 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     mediaType: 'image' | 'video',
     metadata?: Record<string, any>,
     modelOverride?: string,
+    inputImages?: string[],
   ): Promise<Asset[]> {
     const assets: Asset[] = [];
     for (let i = 0; i < count; i += 1) {
       const media =
         mediaType === 'image'
-          ? await this.aiService.generateImage(prompt, modelOverride)
-          : await this.aiService.generateVideo(prompt, modelOverride);
+          ? await this.aiService.generateImage(prompt, modelOverride, inputImages)
+          : await this.aiService.generateVideo(prompt, modelOverride, inputImages);
       if (!media.length) {
         throw new BadRequestException('AI provider returned no media');
       }
@@ -1191,7 +1910,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     const version = await this.taskVersionRepository.findOne({ where: { id: run.taskVersionId } });
     if (!task || !version) throw new NotFoundException('Task not found');
 
-    const folder = this.buildAssetFolder(task.userId, task.id, version.id, type);
+    const spaceId = await this.getWorkflowSpaceId(run);
+    const folder = this.buildAssetFolder(task.userId, task.id, version.id, type, spaceId);
     const filename = this.buildFilename(type, mediaType === 'image' ? 'png' : 'mp4');
     let url: string;
     let mimeType = media.mimeType || (mediaType === 'image' ? 'image/png' : 'video/mp4');
@@ -1207,6 +1927,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       this.assetRepository.create({
         taskId: task.id,
         versionId: version.id,
+        spaceId,
         type,
         status: AssetStatus.ACTIVE,
         url,
@@ -1228,7 +1949,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     const version = await this.taskVersionRepository.findOne({ where: { id: run.taskVersionId } });
     if (!task || !version) throw new NotFoundException('Task not found');
 
-    const folder = this.buildAssetFolder(task.userId, task.id, version.id, type);
+    const spaceId = await this.getWorkflowSpaceId(run);
+    const folder = this.buildAssetFolder(task.userId, task.id, version.id, type, spaceId);
     const buffer = Buffer.from(JSON.stringify(payload, null, 2));
     const url = await this.storageService.uploadBuffer(buffer, filename, {
       folder,
@@ -1240,6 +1962,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       this.assetRepository.create({
         taskId: task.id,
         versionId: version.id,
+        spaceId,
         type,
         status: AssetStatus.ACTIVE,
         url,
@@ -1255,7 +1978,35 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     return await this.saveJsonAsset(run, AssetType.FINAL_VIDEO, 'final.json', payload);
   }
 
-  private buildAssetFolder(userId: number, taskId: number, versionId: number, type: AssetType): string {
+  private async getWorkflowSpaceId(run: WorkflowRun): Promise<number | null> {
+    if (this.workflowSpaceCache.has(run.id)) {
+      return this.workflowSpaceCache.get(run.id) ?? null;
+    }
+    const templateVersion = await this.versionRepository.findOne({
+      where: { id: run.templateVersionId },
+    });
+    if (!templateVersion) {
+      this.workflowSpaceCache.set(run.id, null);
+      return null;
+    }
+    const template = await this.templateRepository.findOne({
+      where: { id: templateVersion.templateId },
+    });
+    const spaceId = template?.spaceId ?? null;
+    this.workflowSpaceCache.set(run.id, spaceId);
+    return spaceId;
+  }
+
+  private buildAssetFolder(
+    userId: number,
+    taskId: number,
+    versionId: number,
+    type: AssetType,
+    spaceId?: number | null,
+  ): string {
+    if (spaceId) {
+      return `users/${userId}/spaces/${spaceId}/tasks/${taskId}/versions/${versionId}/${type}`;
+    }
     return `users/${userId}/tasks/${taskId}/versions/${versionId}/${type}`;
   }
 

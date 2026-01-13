@@ -17,6 +17,11 @@ export class QueryAssetDto {
   @IsOptional()
   @IsInt()
   @Type(() => Number)
+  spaceId?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
   versionId?: number;
 
   @IsOptional()

@@ -5,7 +5,7 @@
 
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Brackets } from 'typeorm';
 import { Asset, Task, User } from '../database/entities';
 import { QueryAssetDto } from './dto';
 import { AssetStatus, UserRole } from '@shared/constants';
@@ -30,17 +30,29 @@ export class AssetService {
    * 查询资产列表
    */
   async findAll(queryDto: QueryAssetDto, user: User): Promise<PaginatedResponse<Asset>> {
-    const { taskId, versionId, type, status, page = 1, limit = 20 } = queryDto;
+    const { taskId, spaceId, versionId, type, status, page = 1, limit = 20 } = queryDto;
 
     const query = this.assetRepository
       .createQueryBuilder('asset')
       .leftJoinAndSelect('asset.task', 'task')
-      .where(user.role === UserRole.ADMIN ? '1=1' : 'task.userId = :userId', {
-        userId: user.id,
-      });
+      .leftJoinAndSelect('asset.space', 'space');
+
+    if (user.role !== UserRole.ADMIN) {
+      query.where(
+        new Brackets((qb) => {
+          qb.where('task.userId = :userId', { userId: user.id }).orWhere('space.userId = :userId', {
+            userId: user.id,
+          });
+        }),
+      );
+    }
 
     if (taskId) {
       query.andWhere('asset.taskId = :taskId', { taskId });
+    }
+
+    if (spaceId) {
+      query.andWhere('asset.spaceId = :spaceId', { spaceId });
     }
 
     if (versionId) {
@@ -75,6 +87,7 @@ export class AssetService {
     const asset = await this.assetRepository
       .createQueryBuilder('asset')
       .leftJoinAndSelect('asset.task', 'task')
+      .leftJoinAndSelect('asset.space', 'space')
       .where('asset.id = :id', { id })
       .getOne();
 
@@ -83,7 +96,8 @@ export class AssetService {
     }
 
     // 权限检查
-    if (asset.task.userId !== user.id && user.role !== UserRole.ADMIN) {
+    const ownerId = asset.task?.userId ?? asset.space?.userId;
+    if (user.role !== UserRole.ADMIN && ownerId !== user.id) {
       throw new ForbiddenException('You can only view your own assets');
     }
 
@@ -97,6 +111,7 @@ export class AssetService {
     const asset = await this.assetRepository
       .createQueryBuilder('asset')
       .leftJoinAndSelect('asset.task', 'task')
+      .leftJoinAndSelect('asset.space', 'space')
       .where('asset.id = :id', { id })
       .getOne();
 
@@ -105,7 +120,8 @@ export class AssetService {
     }
 
     // 权限检查
-    if (asset.task.userId !== user.id && user.role !== UserRole.ADMIN) {
+    const ownerId = asset.task?.userId ?? asset.space?.userId;
+    if (user.role !== UserRole.ADMIN && ownerId !== user.id) {
       throw new ForbiddenException('You can only delete your own assets');
     }
 
@@ -163,6 +179,9 @@ export class AssetService {
    * 创建资产记录
    */
   async createAsset(payload: Partial<Asset>): Promise<Asset> {
+    if (!payload.taskId && !payload.spaceId) {
+      throw new BadRequestException('taskId or spaceId is required');
+    }
     const asset = this.assetRepository.create({
       status: AssetStatus.ACTIVE,
       ...payload,

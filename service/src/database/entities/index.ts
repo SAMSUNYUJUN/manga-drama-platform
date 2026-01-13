@@ -7,6 +7,7 @@ export { User } from './user.entity';
 export { Task } from './task.entity';
 export { TaskVersion } from './task-version.entity';
 export { Asset } from './asset.entity';
+export { AssetSpace } from './asset-space.entity';
 export { WorkflowTemplate } from './workflow-template.entity';
 export { WorkflowTemplateVersion } from './workflow-template-version.entity';
 export { WorkflowRun } from './workflow-run.entity';

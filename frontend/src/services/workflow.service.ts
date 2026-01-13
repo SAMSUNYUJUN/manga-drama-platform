@@ -5,7 +5,7 @@
 
 import api from './api';
 import type { ApiResponse } from '@shared/types/api.types';
-import type { WorkflowTemplate, WorkflowTemplateVersion, WorkflowRun, NodeRun, WorkflowValidationResult } from '@shared/types/workflow.types';
+import type { WorkflowTemplate, WorkflowTemplateVersion, WorkflowRun, NodeRun, WorkflowValidationResult, WorkflowTestResult } from '@shared/types/workflow.types';
 
 export const listWorkflowTemplates = async (): Promise<WorkflowTemplate[]> => {
   const response = await api.get<ApiResponse<WorkflowTemplate[]>>('/workflows/templates');
@@ -13,14 +13,27 @@ export const listWorkflowTemplates = async (): Promise<WorkflowTemplate[]> => {
 };
 
 export const createWorkflowTemplate = async (
-  payload: Pick<WorkflowTemplate, 'name' | 'description'>,
+  payload: Pick<WorkflowTemplate, 'name' | 'description' | 'spaceId'>,
 ): Promise<WorkflowTemplate> => {
   const response = await api.post<ApiResponse<WorkflowTemplate>>('/workflows/templates', payload);
   return response.data.data!;
 };
 
+export const updateWorkflowTemplate = async (
+  id: number,
+  payload: Partial<Pick<WorkflowTemplate, 'name' | 'description' | 'spaceId'>>,
+): Promise<WorkflowTemplate> => {
+  const response = await api.patch<ApiResponse<WorkflowTemplate>>(`/workflows/templates/${id}`, payload);
+  return response.data.data!;
+};
+
 export const getWorkflowTemplate = async (id: number): Promise<WorkflowTemplate> => {
   const response = await api.get<ApiResponse<WorkflowTemplate>>(`/workflows/templates/${id}`);
+  return response.data.data!;
+};
+
+export const deleteWorkflowTemplate = async (id: number): Promise<{ id: number }> => {
+  const response = await api.delete<ApiResponse<{ id: number }>>(`/workflows/templates/${id}`);
   return response.data.data!;
 };
 
@@ -127,6 +140,16 @@ export const submitHumanSelect = async (
 export const testNode = async (payload: { nodeType: string; config?: Record<string, any>; inputs?: Record<string, any> }) => {
   const response = await api.post<ApiResponse<any>>('/workflows/node-test', payload);
   return response.data.data;
+};
+
+export const testWorkflow = async (payload: {
+  nodes: WorkflowTemplateVersion['nodes'];
+  edges: WorkflowTemplateVersion['edges'];
+  startInputs?: Record<string, any>;
+  templateId?: number;
+}): Promise<WorkflowTestResult> => {
+  const response = await api.post<ApiResponse<WorkflowTestResult>>('/workflows/test', payload, { timeout: 60000 });
+  return response.data.data!;
 };
 
 export const getReviewAssets = async (nodeRunId: number) => {

@@ -21,6 +21,23 @@
   gap: var(--spacing-md);
 }
 
+.binding {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.bindingRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.error {
+  color: var(--color-error);
+  font-size: 12px;
+}
+
 .list {
   display: flex;
   flex-direction: column;

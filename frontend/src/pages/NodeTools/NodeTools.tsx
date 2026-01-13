@@ -25,6 +25,14 @@ const VARIABLE_TYPES: WorkflowValueType[] = [
   'list<asset_ref>',
 ];
 
+const MAX_NANO_BANANA_IMAGES = 3;
+
+const isImageUrl = (value?: string) => {
+  if (!value) return false;
+  if (value.startsWith('data:image/')) return true;
+  return /\.(png|jpg|jpeg|gif|webp)(\?|#|$)/i.test(value);
+};
+
 type ToolForm = {
   id?: number;
   name: string;
@@ -55,14 +63,49 @@ export const NodeTools = () => {
   const [promptLoaded, setPromptLoaded] = useState(false);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [testInputs, setTestInputs] = useState<Record<string, any>>({});
+  const [testFiles, setTestFiles] = useState<Record<string, File[]>>({});
   const [testResult, setTestResult] = useState<NodeToolTestResult | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const modelOptions = useMemo(() => {
-    return providers
-      .filter((provider) => provider.type === ProviderType.LLM && provider.enabled)
-      .flatMap((provider) => provider.models || []);
+    const options = providers
+      .filter((provider) => provider.enabled)
+      .flatMap((provider) =>
+        (provider.models || []).map((model) => ({
+          model,
+          type: provider.type,
+          label: `${provider.type} · ${model}`,
+        })),
+      );
+    const seen = new Set<string>();
+    return options.filter((option) => {
+      const key = `${option.type}:${option.model}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [providers]);
+
+  const selectedProviderType = useMemo(() => {
+    if (!form.model) return ProviderType.LLM;
+    return modelOptions.find((option) => option.model === form.model)?.type || ProviderType.LLM;
+  }, [form.model, modelOptions]);
+
+  const isNanoBananaModel = useMemo(() => {
+    if (!form.model) return false;
+    const key = form.model.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return key === 'nanobanana';
+  }, [form.model]);
+
+  const supportsAssetInput =
+    selectedProviderType === ProviderType.IMAGE || selectedProviderType === ProviderType.VIDEO;
+
+  const previewImages = useMemo(() => {
+    if (!testResult) return [];
+    const urls = [...(testResult.mediaUrls || [])];
+    if (testResult.outputText) urls.push(testResult.outputText);
+    return Array.from(new Set(urls.filter((url) => isImageUrl(url))));
+  }, [testResult]);
 
   const loadTools = async () => {
     const data = await nodeToolService.listNodeTools();
@@ -101,6 +144,12 @@ export const NodeTools = () => {
   }, [promptLoaded, promptVersions, form.promptTemplateVersionId]);
 
   useEffect(() => {
+    if (!supportsAssetInput) {
+      setTestFiles({});
+    }
+  }, [supportsAssetInput]);
+
+  useEffect(() => {
     if (!form.promptTemplateVersionId) return;
     const version = promptVersions.find((item) => item.id === form.promptTemplateVersionId);
     if (!version || !version.variables?.length) return;
@@ -132,6 +181,7 @@ export const NodeTools = () => {
       outputs: tool.outputs || [],
     });
     setTestInputs({});
+    setTestFiles({});
     setTestResult(null);
   };
 
@@ -207,6 +257,11 @@ export const NodeTools = () => {
   const handleTest = async () => {
     const parsedInputs: Record<string, any> = {};
     form.inputs.forEach((input) => {
+      const isAsset = input.type === 'asset_ref' || input.type === 'list<asset_ref>';
+      const fileList = testFiles[input.key];
+      if (supportsAssetInput && isAsset && fileList && fileList.length) {
+        return;
+      }
       const raw = testInputs[input.key];
       if (input.type === 'number') {
         parsedInputs[input.key] = raw === '' ? undefined : Number(raw);
@@ -241,11 +296,25 @@ export const NodeTools = () => {
     }
 
     try {
-      const result = await nodeToolService.testNodeTool({
-        promptTemplateVersionId: form.promptTemplateVersionId,
-        model: form.model,
-        inputs: parsedInputs,
-      });
+      const hasFiles = Object.values(testFiles).some((files) => files && files.length);
+      const result = hasFiles
+        ? await nodeToolService.testNodeToolWithFiles(
+            (() => {
+              const formData = new FormData();
+              formData.append('promptTemplateVersionId', String(form.promptTemplateVersionId));
+              if (form.model) formData.append('model', form.model);
+              formData.append('inputs', JSON.stringify(parsedInputs));
+              Object.entries(testFiles).forEach(([key, files]) => {
+                (files || []).forEach((file) => formData.append(key, file));
+              });
+              return formData;
+            })(),
+          )
+        : await nodeToolService.testNodeTool({
+            promptTemplateVersionId: form.promptTemplateVersionId,
+            model: form.model,
+            inputs: parsedInputs,
+          });
       setTestResult(result);
     } catch (error: any) {
       const details = [
@@ -349,9 +418,9 @@ export const NodeTools = () => {
               onChange={(event) => setForm({ ...form, model: event.target.value || undefined })}
             >
               <option value="">使用默认模型</option>
-              {modelOptions.map((model) => (
-                <option key={model} value={model}>
-                  {model}
+              {modelOptions.map((option) => (
+                <option key={`${option.type}:${option.model}`} value={option.model}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -457,7 +526,47 @@ export const NodeTools = () => {
           {form.inputs.map((input) => (
             <div key={`test-${input.key}`} className={styles.testRow}>
               <label>{input.name || input.key}</label>
-              {input.type === 'boolean' ? (
+              {input.type === 'asset_ref' || input.type === 'list<asset_ref>' ? (
+                supportsAssetInput ? (
+                  <>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple={input.type === 'list<asset_ref>'}
+                      onChange={(event) =>
+                        setTestFiles((prev) => {
+                          const fileList = event.target.files ? Array.from(event.target.files) : [];
+                          const limited =
+                            isNanoBananaModel && input.type === 'list<asset_ref>'
+                              ? fileList.slice(0, MAX_NANO_BANANA_IMAGES)
+                              : fileList;
+                          return {
+                            ...prev,
+                            [input.key]: limited,
+                          };
+                        })
+                      }
+                    />
+                    {!!testFiles[input.key]?.length && (
+                      <div className={styles.fileHint}>
+                        已选择: {testFiles[input.key].map((file) => file.name).join(', ')}
+                      </div>
+                    )}
+                    {isNanoBananaModel && input.type === 'list<asset_ref>' && (
+                      <div className={styles.fileHint}>最多支持 {MAX_NANO_BANANA_IMAGES} 张图片</div>
+                    )}
+                  </>
+                ) : (
+                  <textarea
+                    rows={2}
+                    value={testInputs[input.key] ?? ''}
+                    placeholder="输入资产 URL"
+                    onChange={(event) =>
+                      setTestInputs((prev) => ({ ...prev, [input.key]: event.target.value }))
+                    }
+                  />
+                )
+              ) : input.type === 'boolean' ? (
                 <input
                   type="checkbox"
                   checked={!!testInputs[input.key]}
@@ -481,6 +590,13 @@ export const NodeTools = () => {
           </button>
           {testResult && (
             <pre className={styles.testOutput}>{JSON.stringify(testResult, null, 2)}</pre>
+          )}
+          {previewImages.length > 0 && (
+            <div className={styles.imagePreview}>
+              {previewImages.map((url, index) => (
+                <img key={`${url}-${index}`} src={url} alt="Generated preview" />
+              ))}
+            </div>
           )}
         </section>
       </div>

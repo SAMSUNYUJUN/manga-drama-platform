@@ -224,7 +224,7 @@ describe('WorkflowRunService', () => {
       {
         id: 'node-start',
         type: WorkflowNodeType.START,
-        data: { config: {}, outputs: [{ key: 'candidates', type: 'list<text>', required: true }] },
+        data: { config: {}, inputs: [{ key: 'candidates', type: 'list<text>', required: true }] },
       },
       {
         id: 'node-break',

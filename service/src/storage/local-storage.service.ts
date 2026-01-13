@@ -47,20 +47,58 @@ export class LocalStorageService implements IStorageService {
 
   async uploadRemoteFile(fileUrl: string, filename?: string, options?: UploadOptions): Promise<string> {
     try {
-      const response = await axios.get<ArrayBuffer>(fileUrl, {
-        responseType: 'arraybuffer',
-        timeout: 30000,
-      });
-
-      let actualFilename = filename;
-      if (!actualFilename) {
-        actualFilename = path.basename(new URL(fileUrl).pathname) || `file_${Date.now()}`;
+      if (!/^https?:\/\//i.test(fileUrl)) {
+        throw new HttpException('无效的资源链接', HttpStatus.BAD_REQUEST);
       }
+      const maxAttempts = 3;
+      let lastError: any;
 
-      return await this.uploadBuffer(Buffer.from(response.data), actualFilename, options);
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          const response = await axios.get<ArrayBuffer>(fileUrl, {
+            responseType: 'arraybuffer',
+            timeout: 300000,
+            maxRedirects: 5,
+            headers: {
+              'User-Agent': 'Mozilla/5.0',
+              Accept: '*/*',
+            },
+          });
+
+          let actualFilename = filename;
+          if (!actualFilename) {
+            try {
+              actualFilename = path.basename(new URL(fileUrl).pathname) || `file_${Date.now()}`;
+            } catch {
+              actualFilename = `file_${Date.now()}`;
+            }
+          }
+
+          const contentType = (response.headers['content-type'] as string) || options?.contentType;
+          return await this.uploadBuffer(Buffer.from(response.data), actualFilename, { ...options, contentType });
+        } catch (error) {
+          lastError = error;
+          const status = error?.response?.status;
+          const code = error?.code;
+          const shouldRetry =
+            status === 429 || status >= 500 ||
+            ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNABORTED'].includes(code);
+          if (!shouldRetry || attempt === maxAttempts) {
+            throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+        }
+      }
+      throw lastError;
     } catch (error) {
-      this.logger.error(`远程下载上传失败: ${error.message}`);
-      throw new HttpException('存储上传失败', HttpStatus.INTERNAL_SERVER_ERROR);
+      const message = error?.message || '未知错误';
+      const status = error?.response?.status;
+      const code = error?.code;
+      this.logger.error(`远程下载上传失败: ${message} ${status ? `status=${status}` : ''} ${code ? `code=${code}` : ''} url=${fileUrl}`);
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(`存储上传失败: ${message}`, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 

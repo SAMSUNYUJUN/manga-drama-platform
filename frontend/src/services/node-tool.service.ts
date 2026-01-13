@@ -49,6 +49,15 @@ export const testNodeTool = async (
   return response.data.data!;
 };
 
+export const testNodeToolWithFiles = async (formData: FormData): Promise<NodeToolTestResult> => {
+  const response = await api.post<ApiResponse<NodeToolTestResult>>(
+    '/node-tools/test',
+    formData,
+    { timeout: 60000, headers: { 'Content-Type': 'multipart/form-data' } },
+  );
+  return response.data.data!;
+};
+
 export const testNodeToolById = async (
   id: number,
   inputs?: Record<string, any>,

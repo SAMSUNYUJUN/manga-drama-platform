@@ -16,7 +16,7 @@ const API_BASE_URL = rawBaseUrl.startsWith('http')
 // 创建axios实例
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 300000, // 5 minutes for AI operations
   headers: {
     'Content-Type': 'application/json',
   },
@@ -25,6 +25,14 @@ export const api = axios.create({
 // 请求拦截器：添加token
 api.interceptors.request.use(
   (config) => {
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      const headers = config.headers as any;
+      if (headers?.delete) {
+        headers.delete('Content-Type');
+      } else if (headers) {
+        delete headers['Content-Type'];
+      }
+    }
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;

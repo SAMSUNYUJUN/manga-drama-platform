@@ -133,6 +133,19 @@
   font-size: 13px;
 }
 
+.deleteAction {
+  background: none;
+  border: none;
+  color: var(--color-error);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.deleteAction:hover {
+  text-decoration: underline;
+}
+
 .taskDesc {
   font-size: 14px;
   color: var(--color-text-secondary);
@@ -182,6 +195,12 @@
 .date {
   font-size: 12px;
   color: var(--color-text-tertiary);
+}
+
+.deleteError {
+  color: var(--color-error);
+  font-size: 12px;
+  margin-bottom: var(--spacing-md);
 }
 
 @keyframes fadeIn {

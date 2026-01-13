@@ -29,7 +29,7 @@ describe('WorkflowValidationService', () => {
         type: WorkflowNodeType.START,
         data: {
           config: {},
-          outputs: [{ key: 'out', type: 'text', required: true }],
+          inputs: [{ key: 'out', type: 'text', required: true }],
         },
       },
       {
@@ -64,7 +64,7 @@ describe('WorkflowValidationService', () => {
       {
         id: 'node-start',
         type: WorkflowNodeType.START,
-        data: { config: {}, outputs: [{ key: 'out', type: 'text', required: true }] },
+        data: { config: {}, inputs: [{ key: 'out', type: 'text', required: true }] },
       },
       {
         id: 'node-target',

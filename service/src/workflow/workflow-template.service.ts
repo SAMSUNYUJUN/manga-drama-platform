@@ -6,8 +6,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { WorkflowTemplate, WorkflowTemplateVersion } from '../database/entities';
-import { CreateWorkflowTemplateDto, CreateWorkflowTemplateVersionDto } from './dto';
+import { AssetSpace, WorkflowTemplate, WorkflowTemplateVersion } from '../database/entities';
+import { CreateWorkflowTemplateDto, CreateWorkflowTemplateVersionDto, UpdateWorkflowTemplateDto } from './dto';
 
 @Injectable()
 export class WorkflowTemplateService {
@@ -16,12 +16,18 @@ export class WorkflowTemplateService {
     private templateRepository: Repository<WorkflowTemplate>,
     @InjectRepository(WorkflowTemplateVersion)
     private versionRepository: Repository<WorkflowTemplateVersion>,
+    @InjectRepository(AssetSpace)
+    private spaceRepository: Repository<AssetSpace>,
   ) {}
 
   async createTemplate(dto: CreateWorkflowTemplateDto): Promise<WorkflowTemplate> {
+    if (dto.spaceId !== undefined && dto.spaceId !== null) {
+      await this.ensureSpace(dto.spaceId);
+    }
     const template = this.templateRepository.create({
       name: dto.name,
       description: dto.description,
+      spaceId: dto.spaceId ?? null,
     });
     return await this.templateRepository.save(template);
   }
@@ -36,6 +42,26 @@ export class WorkflowTemplateService {
       throw new NotFoundException(`WorkflowTemplate with ID ${id} not found`);
     }
     return template;
+  }
+
+  async updateTemplate(id: number, dto: UpdateWorkflowTemplateDto): Promise<WorkflowTemplate> {
+    const template = await this.getTemplate(id);
+    if (dto.name !== undefined) template.name = dto.name;
+    if (dto.description !== undefined) template.description = dto.description;
+    if (dto.spaceId !== undefined) {
+      if (dto.spaceId === null) {
+        template.spaceId = null;
+      } else {
+        await this.ensureSpace(dto.spaceId);
+        template.spaceId = dto.spaceId;
+      }
+    }
+    return await this.templateRepository.save(template);
+  }
+
+  async deleteTemplate(id: number): Promise<void> {
+    const template = await this.getTemplate(id);
+    await this.templateRepository.remove(template);
   }
 
   async createVersion(
@@ -83,5 +109,12 @@ export class WorkflowTemplateService {
       throw new NotFoundException(`WorkflowTemplateVersion with ID ${versionId} not found`);
     }
     return version;
+  }
+
+  private async ensureSpace(spaceId: number) {
+    const space = await this.spaceRepository.findOne({ where: { id: spaceId } });
+    if (!space) {
+      throw new NotFoundException(`AssetSpace with ID ${spaceId} not found`);
+    }
   }
 }

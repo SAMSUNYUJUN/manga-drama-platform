@@ -10,8 +10,9 @@ import { AssetStatus, AssetType } from '../constants/enums';
  */
 export interface Asset {
   id: number;
-  taskId: number;
-  versionId?: number;
+  taskId?: number | null;
+  spaceId?: number | null;
+  versionId?: number | null;
   type: AssetType;
   url: string;
   filename: string;
@@ -45,6 +46,7 @@ export interface AssetMetadata {
  */
 export interface QueryAssetDto {
   taskId?: number;
+  spaceId?: number;
   versionId?: number;
   type?: AssetType;
   status?: AssetStatus;
