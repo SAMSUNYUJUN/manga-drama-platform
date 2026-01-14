@@ -21,6 +21,10 @@ export class CreateNodeToolDto {
   @IsString()
   model?: string;
 
+  @IsOptional()
+  @IsString()
+  imageAspectRatio?: string;
+
   @IsArray()
   inputs: any[];
 

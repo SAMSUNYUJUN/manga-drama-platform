@@ -70,10 +70,10 @@ const isVideoUrl = (value?: string) => {
   if (value.startsWith('data:video/')) return true;
   return /\.(mp4|webm|mov|mkv)(\?|#|$)/i.test(value);
 };
-// 辅助函数：判断是否为图片输入类型（兼容 image 和旧的 asset_ref）
-const isImageInputType = (type?: string) => type === 'image' || type === 'asset_ref';
-const isImageListInputType = (type?: string) => type === 'list<image>' || type === 'list<asset_ref>';
-const isAnyImageInputType = (type?: string) => isImageInputType(type) || isImageListInputType(type);
+// 辅助函数：判断是否为资产引用类型（图片/视频URL）
+const isAssetRefType = (type?: string) => type === 'asset_ref';
+const isAssetRefListType = (type?: string) => type === 'list<asset_ref>';
+const isAnyAssetRefType = (type?: string) => isAssetRefType(type) || isAssetRefListType(type);
 const readFileAsDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -87,12 +87,12 @@ const VARIABLE_TYPES: WorkflowValueType[] = [
   'number',
   'boolean',
   'json',
-  'image',
+  'asset_ref',
   'list<text>',
   'list<number>',
   'list<boolean>',
   'list<json>',
-  'list<image>',
+  'list<asset_ref>',
 ];
 
 const FIXED_LIBRARY = [WorkflowNodeType.HUMAN_BREAKPOINT];
@@ -120,11 +120,11 @@ const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; 
   },
   [WorkflowNodeType.GENERATE_CHARACTER_IMAGES]: {
     inputs: [{ key: 'prompt', name: '角色提示', type: 'text', required: true }],
-    outputs: [{ key: 'images', name: '角色图片', type: 'list<image>', required: true }],
+    outputs: [{ key: 'images', name: '角色图片', type: 'list<asset_ref>', required: true }],
   },
   [WorkflowNodeType.HUMAN_REVIEW_ASSETS]: {
-    inputs: [{ key: 'assets', name: '候选资产', type: 'list<image>', required: true }],
-    outputs: [{ key: 'assets', name: '通过资产', type: 'list<image>', required: true }],
+    inputs: [{ key: 'assets', name: '候选资产', type: 'list<asset_ref>', required: true }],
+    outputs: [{ key: 'assets', name: '通过资产', type: 'list<asset_ref>', required: true }],
   },
   [WorkflowNodeType.HUMAN_BREAKPOINT]: {
     inputs: [{ key: 'candidates', name: '候选内容', type: 'list<text>', required: true }],
@@ -132,19 +132,19 @@ const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; 
   },
   [WorkflowNodeType.GENERATE_SCENE_IMAGE]: {
     inputs: [{ key: 'prompt', name: '场景提示', type: 'text', required: true }],
-    outputs: [{ key: 'image', name: '场景图', type: 'image', required: true }],
+    outputs: [{ key: 'image', name: '场景图', type: 'asset_ref', required: true }],
   },
   [WorkflowNodeType.GENERATE_KEYFRAMES]: {
     inputs: [{ key: 'prompt', name: '关键帧提示', type: 'text', required: true }],
-    outputs: [{ key: 'frames', name: '关键帧', type: 'list<image>', required: true }],
+    outputs: [{ key: 'frames', name: '关键帧', type: 'list<asset_ref>', required: true }],
   },
   [WorkflowNodeType.GENERATE_VIDEO]: {
     inputs: [{ key: 'prompt', name: '视频提示', type: 'text', required: true }],
-    outputs: [{ key: 'video', name: '视频', type: 'image', required: true }],
+    outputs: [{ key: 'video', name: '视频', type: 'asset_ref', required: true }],
   },
   [WorkflowNodeType.FINAL_COMPOSE]: {
-    inputs: [{ key: 'assets', name: '合成素材', type: 'list<image>', required: true }],
-    outputs: [{ key: 'final', name: '最终视频', type: 'image', required: true }],
+    inputs: [{ key: 'assets', name: '合成素材', type: 'list<asset_ref>', required: true }],
+    outputs: [{ key: 'final', name: '最终视频', type: 'asset_ref', required: true }],
   },
 };
 
@@ -455,7 +455,7 @@ export const WorkflowEditor = () => {
     [workflowTestAssets],
   );
   const hasAssetTestInputs = useMemo(
-    () => startNodeInputs.some((input) => isAnyImageInputType(input.type)),
+    () => startNodeInputs.some((input) => isAnyAssetRefType(input.type)),
     [startNodeInputs],
   );
 
@@ -1122,12 +1122,12 @@ export const WorkflowEditor = () => {
       startNodeInputs.forEach((input) => {
         if (!(input.key in next)) {
           const value = input.defaultValue;
-          const isAssetInput = isAnyImageInputType(input.type);
+          const isAssetInput = isAnyAssetRefType(input.type);
           if (isAssetInput) {
             if (value !== undefined) {
               next[input.key] = value;
             } else {
-              next[input.key] = isImageListInputType(input.type) ? [] : '';
+              next[input.key] = isAssetRefListType(input.type) ? [] : '';
             }
             return;
           }
@@ -1586,9 +1586,9 @@ export const WorkflowEditor = () => {
           {startNodeInputs.map((input) => (
             <div key={input.key} className={styles.testRow}>
               <label>{input.name || input.key}</label>
-              {isAnyImageInputType(input.type) ? (
+              {isAnyAssetRefType(input.type) ? (
                 (() => {
-                  const isList = isImageListInputType(input.type);
+                  const isList = isAssetRefListType(input.type);
                   const rawValue = workflowTestInputs[input.key];
                   const selectedAssetIds = resolveTestInputAssetIds(rawValue);
                   const previewUrls = resolveTestInputMediaUrls(rawValue);

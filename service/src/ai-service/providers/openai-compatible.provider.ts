@@ -43,6 +43,7 @@ export class OpenAICompatibleProvider {
 
   async chatCompletions(payload: Record<string, any>): Promise<AxiosResponse<any>> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
+    console.log('[OpenAICompatibleProvider] chatCompletions payload:', JSON.stringify(payload, null, 2).substring(0, 2000));
     return await this.requestWithRetry(() =>
       axios.post(url, payload, {
         headers: {

@@ -50,6 +50,7 @@ export class NodeToolService {
       description: payload.description ?? null,
       promptTemplateVersionId: payload.promptTemplateVersionId ?? null,
       model: payload.model ?? null,
+      imageAspectRatio: payload.imageAspectRatio ?? '16:9',
       enabled: payload.enabled ?? true,
       inputs: safeInputs,
       outputs: safeOutputs,
@@ -72,6 +73,7 @@ export class NodeToolService {
       tool.promptTemplateVersionId = payload.promptTemplateVersionId;
     }
     if (payload.model !== undefined) tool.model = payload.model;
+    if (payload.imageAspectRatio !== undefined) tool.imageAspectRatio = payload.imageAspectRatio;
     if (payload.enabled !== undefined) tool.enabled = payload.enabled;
     if (payload.inputs !== undefined) {
       tool.inputs = Array.isArray(payload.inputs) ? payload.inputs : [];
@@ -92,6 +94,7 @@ export class NodeToolService {
     return await this.testToolConfig({
       promptTemplateVersionId: tool.promptTemplateVersionId ?? undefined,
       model: tool.model ?? undefined,
+      imageAspectRatio: tool.imageAspectRatio ?? '16:9',
       inputs: inputs || {},
     });
   }
@@ -106,6 +109,7 @@ export class NodeToolService {
       {
         promptTemplateVersionId: tool.promptTemplateVersionId ?? undefined,
         model: tool.model ?? undefined,
+        imageAspectRatio: tool.imageAspectRatio ?? '16:9',
         inputs: inputs || {},
       },
       files,
@@ -113,7 +117,7 @@ export class NodeToolService {
   }
 
   async testToolConfigWithFiles(
-    payload: { promptTemplateVersionId?: number; model?: string; inputs?: Record<string, any> },
+    payload: { promptTemplateVersionId?: number; model?: string; imageAspectRatio?: string; inputs?: Record<string, any> },
     files: any[] = [],
   ) {
     if (!files.length) {
@@ -134,10 +138,11 @@ export class NodeToolService {
   async testToolConfig(payload: {
     promptTemplateVersionId?: number;
     model?: string;
+    imageAspectRatio?: string;
     inputs?: Record<string, any>;
     assetUrls?: string[];
   }) {
-    console.log('[NodeToolService] testToolConfig START', { model: payload.model, hasAssetUrls: !!payload.assetUrls });
+    console.log('[NodeToolService] testToolConfig START', { model: payload.model, imageAspectRatio: payload.imageAspectRatio, hasAssetUrls: !!payload.assetUrls });
     try {
       if (!payload.promptTemplateVersionId) {
         throw new BadRequestException('promptTemplateVersionId is required for testing');
@@ -158,13 +163,23 @@ export class NodeToolService {
       let mediaUrls: string[] | undefined;
       if (providerType === ProviderType.IMAGE) {
         console.log('[NodeToolService] Calling generateImage...');
-        const results = await this.aiService.generateImage(rendered.rendered, payload.model, assetUrls);
+        const results = await this.aiService.generateImage(
+          rendered.rendered,
+          payload.model,
+          assetUrls,
+          { imageAspectRatio: payload.imageAspectRatio },
+        );
         console.log('[NodeToolService] generateImage completed, results:', results.length);
         mediaUrls = this.toMediaUrls(results, 'image/png');
         outputText = mediaUrls[0] || '';
       } else if (providerType === ProviderType.VIDEO) {
         console.log('[NodeToolService] Calling generateVideo...');
-        const results = await this.aiService.generateVideo(rendered.rendered, payload.model, assetUrls);
+        const results = await this.aiService.generateVideo(
+          rendered.rendered,
+          payload.model,
+          assetUrls,
+          { imageAspectRatio: payload.imageAspectRatio },
+        );
         console.log('[NodeToolService] generateVideo completed, results:', results.length);
         mediaUrls = this.toMediaUrls(results, 'video/mp4');
         outputText = mediaUrls[0] || '';

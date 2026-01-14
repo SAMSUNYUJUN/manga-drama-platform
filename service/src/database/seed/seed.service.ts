@@ -72,40 +72,68 @@ export class SeedService implements OnModuleInit {
 
   private async seedProviders() {
     const existing = await this.providerRepository.find();
+    
+    // Check if we need to update VIDEO provider to jimeng-video-3.0
+    const videoProvider = existing.find((p) => p.type === ProviderType.VIDEO);
+    if (videoProvider) {
+      let needsUpdate = false;
+      if (videoProvider.name !== 'jimeng-video-3.0') {
+        videoProvider.name = 'jimeng-video-3.0';
+        needsUpdate = true;
+      }
+      if (videoProvider.baseUrl !== 'https://api.qingyuntop.top') {
+        videoProvider.baseUrl = 'https://api.qingyuntop.top';
+        needsUpdate = true;
+      }
+      if (!videoProvider.modelsJson?.includes('jimeng-video-3.0')) {
+        videoProvider.modelsJson = JSON.stringify(['jimeng-video-3.0']);
+        needsUpdate = true;
+      }
+      // Update API key if empty
+      if (!videoProvider.apiKey) {
+        videoProvider.apiKey = 'sk-XXCknLNDrvMzlP5xH8TdNktmi0ELONh5YFB5zix6omkzzoUi';
+        needsUpdate = true;
+      }
+      if (needsUpdate) {
+        await this.providerRepository.save(videoProvider);
+        this.logger.log('Updated VIDEO provider to jimeng-video-3.0');
+      }
+      
+      // Also update global config
+      const globalConfig = await this.globalConfigRepository.findOne({ where: { id: 1 } });
+      if (globalConfig && globalConfig.defaultVideoModel !== 'jimeng-video-3.0') {
+        globalConfig.defaultVideoModel = 'jimeng-video-3.0';
+        await this.globalConfigRepository.save(globalConfig);
+      }
+    }
+    
     if (existing.length) return;
 
-    const baseUrl = this.configService.get<string>('AI_GATEWAY_BASE_URL', 'https://newapi.aisonnet.org/v1');
-    const apiKey = this.configService.get<string>('AI_GATEWAY_API_KEY', '');
-    const defaultModels = {
-      llm: ['deepseek-v3.2'],
-      image: ['nanobanana', 'jimeng-4.1', 'jimeng-4.1-4k', 'jimeng-4.5', 'jimeng-4.5-4k'],
-      video: ['jimeng-video-3.5-pro', 'jimeng-video-3.5-pro-10s'],
-    };
-
+    // Only seed 3 models: deepseek-chat, nano-banana, jimeng-video-3.0
     const providers = [
       this.providerRepository.create({
-        name: 'Aisonnet LLM',
+        name: 'deepseek-chat',
         type: ProviderType.LLM,
-        baseUrl,
-        apiKey,
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: '', // User should configure via admin UI
         enabled: true,
-        modelsJson: JSON.stringify(defaultModels.llm),
+        modelsJson: JSON.stringify(['deepseek-chat']),
       }),
       this.providerRepository.create({
-        name: 'Aisonnet Image',
+        name: 'nano-banana',
         type: ProviderType.IMAGE,
-        baseUrl,
-        apiKey,
+        baseUrl: 'https://newapi.aisonnet.org/v1',
+        apiKey: '', // User should configure via admin UI
         enabled: true,
-        modelsJson: JSON.stringify(defaultModels.image),
+        modelsJson: JSON.stringify(['nano-banana']),
       }),
       this.providerRepository.create({
-        name: 'Aisonnet Video',
+        name: 'jimeng-video-3.0',
         type: ProviderType.VIDEO,
-        baseUrl,
-        apiKey,
+        baseUrl: 'https://api.qingyuntop.top',
+        apiKey: '', // User should configure via admin UI
         enabled: true,
-        modelsJson: JSON.stringify(defaultModels.video),
+        modelsJson: JSON.stringify(['jimeng-video-3.0']),
       }),
     ];
     await this.providerRepository.save(providers);
@@ -115,9 +143,9 @@ export class SeedService implements OnModuleInit {
       defaultLlmProviderId: providers[0].id,
       defaultImageProviderId: providers[1].id,
       defaultVideoProviderId: providers[2].id,
-      defaultLlmModel: this.configService.get<string>('LLM_MODEL', 'deepseek-v3.2'),
-      defaultImageModel: this.configService.get<string>('IMAGE_MODEL', 'jimeng-4.5'),
-      defaultVideoModel: this.configService.get<string>('VIDEO_MODEL', 'jimeng-video-3.5-pro-10s'),
+      defaultLlmModel: 'deepseek-chat',
+      defaultImageModel: 'nano-banana',
+      defaultVideoModel: 'jimeng-video-3.0',
     });
     await this.globalConfigRepository.save(globalConfig);
     this.logger.log('Seeded providers and global config');

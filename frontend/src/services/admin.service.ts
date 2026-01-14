@@ -44,6 +44,10 @@ export const disableProvider = async (id: number): Promise<ProviderConfig> => {
   return response.data.data!;
 };
 
+export const deleteProvider = async (id: number): Promise<void> => {
+  await api.delete(`/admin/providers/${id}`);
+};
+
 export const getGlobalConfig = async (): Promise<GlobalConfig> => {
   const response = await api.get<ApiResponse<GlobalConfig>>('/admin/config');
   return response.data.data!;

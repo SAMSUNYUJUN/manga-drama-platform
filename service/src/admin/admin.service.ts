@@ -63,6 +63,14 @@ export class AdminService {
     return this.updateProvider(id, { enabled: false });
   }
 
+  async deleteProvider(id: number): Promise<void> {
+    const provider = await this.providerRepository.findOne({ where: { id } });
+    if (!provider) {
+      throw new NotFoundException(`Provider with ID ${id} not found`);
+    }
+    await this.providerRepository.remove(provider);
+  }
+
   async getGlobalConfig(): Promise<GlobalConfig> {
     let config = await this.globalConfigRepository.findOne({ where: { id: 1 } });
     if (!config) {

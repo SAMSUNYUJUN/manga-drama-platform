@@ -25,6 +25,7 @@ export class NodeToolController {
       description: tool.description,
       promptTemplateVersionId: tool.promptTemplateVersionId,
       model: tool.model,
+      imageAspectRatio: tool.imageAspectRatio,
       enabled: tool.enabled,
       inputs: tool.inputs || [],
       outputs: tool.outputs || [],
@@ -117,18 +118,20 @@ export class NodeToolController {
   ): Promise<ApiResponse<any>> {
     const promptVersionId = this.toPromptVersionId(dto?.promptTemplateVersionId);
     this.logger.log(
-      `[node-tools/test] hit promptVersion=${promptVersionId ?? 'none'}`,
+      `[node-tools/test] hit promptVersion=${promptVersionId ?? 'none'} imageAspectRatio=${dto?.imageAspectRatio ?? '16:9'}`,
     );
     try {
       const inputs = this.parseInputs(dto?.inputs);
+      const imageAspectRatio = dto?.imageAspectRatio || '16:9';
       const data = files?.length
         ? await this.nodeToolService.testToolConfigWithFiles(
-            { promptTemplateVersionId: promptVersionId, model: dto?.model, inputs },
+            { promptTemplateVersionId: promptVersionId, model: dto?.model, imageAspectRatio, inputs },
             files,
           )
         : await this.nodeToolService.testToolConfig({
             promptTemplateVersionId: promptVersionId,
             model: dto?.model,
+            imageAspectRatio,
             inputs,
           });
       return { success: true, data, message: 'Node tool test completed' };

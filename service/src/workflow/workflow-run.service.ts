@@ -765,11 +765,13 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       if (node.type === WorkflowNodeType.LLM_TOOL) {
         let promptTemplateVersionId = config.promptTemplateVersionId;
         let model = config.model;
+        let imageAspectRatio = config.imageAspectRatio;
         let tool: any;
         if ((promptTemplateVersionId === undefined || model === undefined) && node.data?.toolId) {
           tool = await this.nodeToolService.getTool(node.data.toolId);
           promptTemplateVersionId = promptTemplateVersionId ?? tool.promptTemplateVersionId ?? undefined;
           model = model ?? tool.model ?? undefined;
+          imageAspectRatio = imageAspectRatio ?? tool.imageAspectRatio ?? '16:9';
         }
         if (!promptTemplateVersionId) {
           throw new BadRequestException('promptTemplateVersionId is required for LLM tool test');
@@ -792,8 +794,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           const inputImages = await this.prepareInputImagesForModel(inputAssetUrls, model, { forceDataUri: true });
           const media =
             providerType === ProviderType.IMAGE
-              ? await this.aiService.generateImage(rendered.rendered, model, inputImages)
-              : await this.aiService.generateVideo(rendered.rendered, model, inputImages);
+              ? await this.aiService.generateImage(rendered.rendered, model, inputImages, { imageAspectRatio })
+              : await this.aiService.generateVideo(rendered.rendered, model, inputImages, { imageAspectRatio });
           const urls = media.map((item) =>
             item.url
               ? item.url
@@ -1413,7 +1415,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     assetIds?: number[],
     assetUrls?: string[],
   ) {
-    if (type === 'list<image>' || type === 'list<asset_ref>') {
+    if (type === 'list<asset_ref>') {
       if (assetUrls && assetUrls.length) return assetUrls;
       if (assetIds && assetIds.length) return assetIds;
       if (value && typeof value === 'object' && Array.isArray((value as any).mediaUrls)) {
@@ -1430,7 +1432,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       if (assetIds) return assetIds;
       return value !== undefined ? [value] : [];
     }
-    if (type === 'image' || type === 'asset_ref') {
+    if (type === 'asset_ref') {
       if (assetUrls && assetUrls.length) return assetUrls[0];
       if (typeof value === 'number') return value;
       if (Array.isArray(assetIds) && assetIds.length) return assetIds[0];
@@ -1472,11 +1474,11 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
   }
 
   private isImageValueType(type?: string) {
-    return type === 'image' || type === 'asset_ref';
+    return type === 'asset_ref';
   }
 
   private isImageListType(type?: string) {
-    return type === 'list<image>' || type === 'list<asset_ref>';
+    return type === 'list<asset_ref>';
   }
 
   private resolveToolOutputs(node: any, tool?: any) {

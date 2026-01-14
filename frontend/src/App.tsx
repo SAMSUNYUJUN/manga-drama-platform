@@ -18,7 +18,6 @@ import { PromptDetail } from './pages/PromptDetail';
 import { Assets } from './pages/Assets';
 import { Trash } from './pages/Trash';
 import { AdminProviders } from './pages/AdminProviders';
-import { AdminConfig } from './pages/AdminConfig';
 import { NodeTools } from './pages/NodeTools';
 import './App.css';
 
@@ -169,14 +168,6 @@ function App() {
             element={
               <ProtectedRoute>
                 <AdminProviders />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/config"
-            element={
-              <ProtectedRoute>
-                <AdminConfig />
               </ProtectedRoute>
             }
           />

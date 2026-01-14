@@ -36,10 +36,7 @@ export const Sidebar = () => {
               🧰 节点工具
             </NavLink>
             <NavLink to="/admin/providers" className={({ isActive }) => isActive ? styles.active : ''}>
-              ⚙️ Provider
-            </NavLink>
-            <NavLink to="/admin/config" className={({ isActive }) => isActive ? styles.active : ''}>
-              🧭 全局配置
+              🤖 模型管理
             </NavLink>
           </>
         )}

@@ -1,1 +1,0 @@
-export { AdminConfig } from './AdminConfig';

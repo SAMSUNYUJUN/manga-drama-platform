@@ -23,6 +23,9 @@ export class NodeTool {
   @Column({ type: 'varchar', length: 120, nullable: true })
   model?: string | null;
 
+  @Column({ type: 'varchar', length: 20, nullable: true, default: '16:9' })
+  imageAspectRatio?: string | null;
+
   @Column({ type: 'text' })
   inputsJson: string;
 

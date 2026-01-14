@@ -17,6 +17,10 @@ export class TestNodeToolDto {
   model?: string;
 
   @IsOptional()
+  @IsString()
+  imageAspectRatio?: string;
+
+  @IsOptional()
   @ValidateIf((_, value) => typeof value === 'string')
   @IsString()
   @ValidateIf((_, value) => typeof value === 'object')

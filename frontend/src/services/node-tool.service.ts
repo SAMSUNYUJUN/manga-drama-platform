@@ -44,7 +44,7 @@ export const testNodeTool = async (
   const response = await api.post<ApiResponse<NodeToolTestResult>>(
     '/node-tools/test',
     payload,
-    { timeout: 60000 },
+    { timeout: 600000 }, // 10 minutes for video generation
   );
   return response.data.data!;
 };
@@ -53,7 +53,7 @@ export const testNodeToolWithFiles = async (formData: FormData): Promise<NodeToo
   const response = await api.post<ApiResponse<NodeToolTestResult>>(
     '/node-tools/test',
     formData,
-    { timeout: 60000, headers: { 'Content-Type': 'multipart/form-data' } },
+    { timeout: 600000, headers: { 'Content-Type': 'multipart/form-data' } }, // 10 minutes for video generation
   );
   return response.data.data!;
 };
@@ -65,7 +65,7 @@ export const testNodeToolById = async (
   const response = await api.post<ApiResponse<NodeToolTestResult>>(
     `/node-tools/${id}/test`,
     { inputs },
-    { timeout: 60000 },
+    { timeout: 600000 }, // 10 minutes for video generation
   );
   return response.data.data!;
 };

@@ -3,7 +3,7 @@
  * @module admin
  */
 
-import { Controller, Get, Post, Patch, Param, Body, ParseIntPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, ParseIntPipe, UseGuards } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { ApiResponse, ProviderConfig, GlobalConfig } from '@shared/types';
 import { CreateProviderDto, UpdateProviderDto, UpdateGlobalConfigDto } from './dto';
@@ -74,6 +74,18 @@ export class AdminController {
   ): Promise<ApiResponse<ProviderConfig>> {
     const data = await this.adminService.disableProvider(id);
     return { success: true, data, message: 'Provider disabled' };
+  }
+
+  /**
+   * 删除Provider
+   * DELETE /api/admin/providers/:id
+   */
+  @Delete('providers/:id')
+  async deleteProvider(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<ApiResponse<null>> {
+    await this.adminService.deleteProvider(id);
+    return { success: true, data: null, message: 'Provider deleted' };
   }
 
   /**

@@ -23,6 +23,10 @@ export class UpdateNodeToolDto {
   model?: string;
 
   @IsOptional()
+  @IsString()
+  imageAspectRatio?: string;
+
+  @IsOptional()
   @IsArray()
   inputs?: any[];
 

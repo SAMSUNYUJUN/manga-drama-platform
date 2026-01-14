@@ -37,7 +37,11 @@ import * as path from 'path';
         migrations: [path.join(__dirname, 'migrations/*{.ts,.js}')],
         migrationsRun: true,
         synchronize: false,
-        logging: configService.get<string>('NODE_ENV') !== 'production',
+        // Only log errors and slow queries (> 1s), not every query
+        logging: configService.get<string>('NODE_ENV') !== 'production' 
+          ? ['error', 'warn', 'migration']
+          : false,
+        maxQueryExecutionTime: 1000, // Log queries taking longer than 1 second
       }),
       inject: [ConfigService],
     }),

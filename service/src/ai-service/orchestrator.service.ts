@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import { ProviderConfig, GlobalConfig } from '../database/entities';
 import { ProviderType } from '@shared/constants';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
+import { JimengVideoProvider } from './providers/jimeng-video.provider';
 
 export interface MediaResult {
   url?: string;
@@ -85,8 +86,9 @@ export class AiOrchestratorService {
     prompt: string,
     modelOverride?: string,
     inputImages?: string[],
+    options?: { imageAspectRatio?: string },
   ): Promise<MediaResult[]> {
-    console.log('[AiOrchestratorService] generateImage START', { model: modelOverride, inputImagesCount: inputImages?.length });
+    console.log('[AiOrchestratorService] generateImage START', { model: modelOverride, inputImagesCount: inputImages?.length, aspectRatio: options?.imageAspectRatio });
     if (this.aiMode === 'mock') {
       return [this.mockImage()];
     }
@@ -94,9 +96,22 @@ export class AiOrchestratorService {
     const { provider, model } = await this.getProvider(ProviderType.IMAGE, modelOverride);
     console.log('[AiOrchestratorService] Building multimodal content...');
     const content = this.buildMultimodalContent(prompt, inputImages);
+    
+    // Build messages array with optional system message for aspect ratio
+    const messages: Array<{ role: 'system' | 'user'; content: any }> = [];
+    const aspectRatio = options?.imageAspectRatio || '16:9';
+    if (this.isNanoBananaModel(model)) {
+      // Add system message with imageConfig for nano-banana
+      messages.push({
+        role: 'system',
+        content: JSON.stringify({ imageConfig: { aspectRatio } }),
+      });
+    }
+    messages.push({ role: 'user', content });
+    
     console.log('[AiOrchestratorService] Making API request...');
     const response = await this.requestWithModelFallback(provider, model, {
-      messages: [{ role: 'user', content }],
+      messages,
       max_tokens: this.getMediaMaxTokens(),
       temperature: 0.7,
     });
@@ -110,19 +125,67 @@ export class AiOrchestratorService {
     prompt: string,
     modelOverride?: string,
     inputImages?: string[],
+    options?: { imageAspectRatio?: string },
   ): Promise<MediaResult[]> {
+    console.log('[AiOrchestratorService] generateVideo START', { model: modelOverride, inputImagesCount: inputImages?.length, aspectRatio: options?.imageAspectRatio });
     if (this.aiMode === 'mock') {
       return [this.mockVideo()];
     }
-    const { provider, model } = await this.getProvider(ProviderType.VIDEO, modelOverride);
+    
+    // Check if this is jimeng-video model
+    const model = modelOverride || 'jimeng-video-3.0';
+    if (this.isJimengVideoModel(model)) {
+      return await this.generateVideoWithJimeng(prompt, inputImages, options?.imageAspectRatio);
+    }
+    
+    // Fallback to OpenAI-compatible provider
+    const { provider, model: resolvedModel } = await this.getProvider(ProviderType.VIDEO, modelOverride);
     const content = this.buildMultimodalContent(prompt, inputImages);
-    const response = await this.requestWithModelFallback(provider, model, {
+    const response = await this.requestWithModelFallback(provider, resolvedModel, {
       messages: [{ role: 'user', content }],
       max_tokens: this.getMediaMaxTokens(),
       temperature: 0.7,
     });
     const media = this.extractMedia(response.data);
     return media;
+  }
+
+  private async generateVideoWithJimeng(
+    prompt: string,
+    inputImages?: string[],
+    aspectRatio?: string,
+  ): Promise<MediaResult[]> {
+    // Get jimeng video provider config
+    const providerConfig = await this.providerRepository.findOne({
+      where: { enabled: true },
+      order: { updatedAt: 'DESC' },
+    });
+    
+    // Use dedicated jimeng API endpoint and key
+    const baseUrl = 'https://api.qingyuntop.top';
+    const apiKey = 'sk-XXCknLNDrvMzlP5xH8TdNktmi0ELONh5YFB5zix6omkzzoUi';
+    
+    const jimengProvider = new JimengVideoProvider({
+      baseUrl,
+      apiKey,
+      timeoutMs: 60000,
+      pollIntervalMs: 5000,
+      maxPollAttempts: 120, // 10 minutes max
+    });
+    
+    const result = await jimengProvider.generateVideo(
+      prompt,
+      aspectRatio || '16:9',
+      inputImages || [],
+    );
+    
+    return [{ url: result.videoUrl, mimeType: 'video/mp4' }];
+  }
+
+  private isJimengVideoModel(model?: string): boolean {
+    if (!model) return false;
+    const key = this.normalizeModelKey(model);
+    return key.includes('jimengvideo') || key === 'jimengvideo30';
   }
 
   async resolveProviderType(model?: string): Promise<ProviderType> {
@@ -144,17 +207,31 @@ export class AiOrchestratorService {
     const globalConfig = await this.globalConfigRepository.findOne({ where: { id: 1 } });
     const model = this.normalizeModelName(modelOverride || this.getDefaultModel(type, globalConfig));
 
-    const providerId =
-      type === ProviderType.LLM
-        ? globalConfig?.defaultLlmProviderId
-        : type === ProviderType.IMAGE
-        ? globalConfig?.defaultImageProviderId
-        : globalConfig?.defaultVideoProviderId;
-
+    // 优先根据模型名称查找对应的 provider
     let providerConfig: ProviderConfig | null = null;
-    if (providerId) {
-      providerConfig = await this.providerRepository.findOne({ where: { id: providerId } });
+    if (modelOverride) {
+      const targetKey = this.normalizeModelKey(modelOverride);
+      const providers = await this.providerRepository.find({ where: { enabled: true } });
+      providerConfig = providers.find((provider) =>
+        provider.models.some((candidate) => this.normalizeModelKey(candidate) === targetKey),
+      ) || null;
     }
+
+    // 如果没有找到，则根据 globalConfig 中的 providerId 查找
+    if (!providerConfig) {
+      const providerId =
+        type === ProviderType.LLM
+          ? globalConfig?.defaultLlmProviderId
+          : type === ProviderType.IMAGE
+          ? globalConfig?.defaultImageProviderId
+          : globalConfig?.defaultVideoProviderId;
+
+      if (providerId) {
+        providerConfig = await this.providerRepository.findOne({ where: { id: providerId } });
+      }
+    }
+
+    // 如果还是没有，则根据类型查找最近更新的 provider
     if (!providerConfig) {
       providerConfig = await this.providerRepository.findOne({
         where: { type, enabled: true },
@@ -171,7 +248,7 @@ export class AiOrchestratorService {
       this.logger.warn(`Missing API key for ${type} provider`);
     }
 
-    this.logger.log(`Provider config: type=${type}, model=${model}, timeout=${timeoutMs}ms, retry=${retryCount}`);
+    this.logger.log(`Provider config: type=${type}, model=${model}, baseUrl=${baseUrl}, timeout=${timeoutMs}ms, retry=${retryCount}`);
 
     return {
       provider: new OpenAICompatibleProvider({
@@ -255,6 +332,12 @@ export class AiOrchestratorService {
     const key = this.normalizeModelKey(model);
     if (key === 'nanobanana') return 'nano-banana';
     return model.trim();
+  }
+
+  private isNanoBananaModel(model?: string): boolean {
+    if (!model) return false;
+    const key = this.normalizeModelKey(model);
+    return key === 'nanobanana';
   }
 
   private extractMedia(response: any): MediaResult[] {

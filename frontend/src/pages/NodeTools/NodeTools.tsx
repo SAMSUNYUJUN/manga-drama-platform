@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { nodeToolService, promptService, adminService } from '../../services';
 import type { NodeTool, NodeToolTestResult } from '@shared/types/node-tool.types';
+import { IMAGE_ASPECT_RATIOS } from '@shared/types/node-tool.types';
 import type { PromptTemplateVersion } from '@shared/types/prompt.types';
 import type { ProviderConfig } from '@shared/types/provider.types';
 import type { WorkflowValueType, WorkflowVariable } from '@shared/types/workflow.types';
@@ -17,12 +18,12 @@ const VARIABLE_TYPES: WorkflowValueType[] = [
   'number',
   'boolean',
   'json',
-  'image',
+  'asset_ref',
   'list<text>',
   'list<number>',
   'list<boolean>',
   'list<json>',
-  'list<image>',
+  'list<asset_ref>',
 ];
 
 const MAX_NANO_BANANA_IMAGES = 3;
@@ -33,10 +34,16 @@ const isImageUrl = (value?: string) => {
   return /\.(png|jpg|jpeg|gif|webp)(\?|#|$)/i.test(value);
 };
 
-// 辅助函数：判断是否为图片输入类型（兼容 image 和旧的 asset_ref）
-const isImageInputType = (type?: string) => type === 'image' || type === 'asset_ref';
-const isImageListInputType = (type?: string) => type === 'list<image>' || type === 'list<asset_ref>';
-const isAnyImageInputType = (type?: string) => isImageInputType(type) || isImageListInputType(type);
+const isVideoUrl = (value?: string) => {
+  if (!value) return false;
+  if (value.startsWith('data:video/')) return true;
+  return /\.(mp4|webm|mov|avi)(\?|#|$)/i.test(value);
+};
+
+// 辅助函数：判断是否为资产引用类型（图片/视频URL）
+const isAssetRefType = (type?: string) => type === 'asset_ref';
+const isAssetRefListType = (type?: string) => type === 'list<asset_ref>';
+const isAnyAssetRefType = (type?: string) => isAssetRefType(type) || isAssetRefListType(type);
 
 type ToolForm = {
   id?: number;
@@ -44,6 +51,7 @@ type ToolForm = {
   description: string;
   promptTemplateVersionId?: number;
   model?: string;
+  imageAspectRatio?: string;
   enabled: boolean;
   inputs: WorkflowVariable[];
   outputs: WorkflowVariable[];
@@ -56,6 +64,7 @@ const emptyForm: ToolForm = {
   description: '',
   promptTemplateVersionId: undefined,
   model: undefined,
+  imageAspectRatio: '16:9',
   enabled: true,
   inputs: [],
   outputs: [],
@@ -73,15 +82,17 @@ export const NodeTools = () => {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const modelOptions = useMemo(() => {
+    // 每个 provider 只取第一个模型（模型管理页面注册时 models 数组只有一个元素）
     const options = providers
       .filter((provider) => provider.enabled)
-      .flatMap((provider) =>
-        (provider.models || []).map((model) => ({
+      .map((provider) => {
+        const model = provider.models?.[0] || provider.name;
+        return {
           model,
           type: provider.type,
           label: `${provider.type} · ${model}`,
-        })),
-      );
+        };
+      });
     const seen = new Set<string>();
     return options.filter((option) => {
       const key = `${option.type}:${option.model}`;
@@ -102,6 +113,15 @@ export const NodeTools = () => {
     return key === 'nanobanana';
   }, [form.model]);
 
+  const isJimengVideoModel = useMemo(() => {
+    if (!form.model) return false;
+    const key = form.model.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return key.includes('jimengvideo') || key === 'jimengvideo30';
+  }, [form.model]);
+
+  // Show aspect ratio for nano-banana and jimeng-video models
+  const showAspectRatio = isNanoBananaModel || isJimengVideoModel;
+
   const supportsAssetInput =
     selectedProviderType === ProviderType.IMAGE || selectedProviderType === ProviderType.VIDEO;
 
@@ -110,6 +130,14 @@ export const NodeTools = () => {
     const urls = [...(testResult.mediaUrls || [])];
     if (testResult.outputText) urls.push(testResult.outputText);
     return Array.from(new Set(urls.filter((url) => isImageUrl(url))));
+  }, [testResult]);
+
+  // Video preview URLs
+  const previewVideos = useMemo(() => {
+    if (!testResult) return [];
+    const urls = [...(testResult.mediaUrls || [])];
+    if (testResult.outputText) urls.push(testResult.outputText);
+    return Array.from(new Set(urls.filter((url) => isVideoUrl(url))));
   }, [testResult]);
 
   const loadTools = async () => {
@@ -181,6 +209,7 @@ export const NodeTools = () => {
       description: tool.description || '',
       promptTemplateVersionId: tool.promptTemplateVersionId || undefined,
       model: tool.model || undefined,
+      imageAspectRatio: tool.imageAspectRatio || '16:9',
       enabled: tool.enabled,
       inputs: tool.inputs || [],
       outputs: tool.outputs || [],
@@ -197,6 +226,7 @@ export const NodeTools = () => {
       description: form.description,
       promptTemplateVersionId: form.promptTemplateVersionId,
       model: form.model,
+      imageAspectRatio: form.imageAspectRatio,
       enabled: form.enabled,
       inputs: form.inputs,
       outputs: form.outputs,
@@ -262,7 +292,7 @@ export const NodeTools = () => {
   const handleTest = async () => {
     const parsedInputs: Record<string, any> = {};
     form.inputs.forEach((input) => {
-      const isAsset = isAnyImageInputType(input.type);
+      const isAsset = isAnyAssetRefType(input.type);
       const fileList = testFiles[input.key];
       if (supportsAssetInput && isAsset && fileList && fileList.length) {
         return;
@@ -308,6 +338,7 @@ export const NodeTools = () => {
               const formData = new FormData();
               formData.append('promptTemplateVersionId', String(form.promptTemplateVersionId));
               if (form.model) formData.append('model', form.model);
+              if (form.imageAspectRatio) formData.append('imageAspectRatio', form.imageAspectRatio);
               formData.append('inputs', JSON.stringify(parsedInputs));
               Object.entries(testFiles).forEach(([key, files]) => {
                 (files || []).forEach((file) => formData.append(key, file));
@@ -318,6 +349,7 @@ export const NodeTools = () => {
         : await nodeToolService.testNodeTool({
             promptTemplateVersionId: form.promptTemplateVersionId,
             model: form.model,
+            imageAspectRatio: form.imageAspectRatio,
             inputs: parsedInputs,
           });
       setTestResult(result);
@@ -429,6 +461,21 @@ export const NodeTools = () => {
                 </option>
               ))}
             </select>
+            {showAspectRatio && (
+              <div className={styles.modelOptions}>
+                <label>{isJimengVideoModel ? '生成视频比例' : '生成图片比例'}</label>
+                <select
+                  value={form.imageAspectRatio || '16:9'}
+                  onChange={(event) => setForm({ ...form, imageAspectRatio: event.target.value })}
+                >
+                  {IMAGE_ASPECT_RATIOS.map((ratio) => (
+                    <option key={ratio} value={ratio}>
+                      {ratio}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <label className={styles.checkbox}>
               <input
                 type="checkbox"
@@ -531,18 +578,18 @@ export const NodeTools = () => {
           {form.inputs.map((input) => (
             <div key={`test-${input.key}`} className={styles.testRow}>
               <label>{input.name || input.key}</label>
-              {isAnyImageInputType(input.type) ? (
+              {isAnyAssetRefType(input.type) ? (
                 supportsAssetInput ? (
                   <>
                     <input
                       type="file"
                       accept="image/*"
-                      multiple={isImageListInputType(input.type)}
+                      multiple={isAssetRefListType(input.type)}
                       onChange={(event) =>
                         setTestFiles((prev) => {
                           const fileList = event.target.files ? Array.from(event.target.files) : [];
                           const limited =
-                            isNanoBananaModel && isImageListInputType(input.type)
+                            isNanoBananaModel && isAssetRefListType(input.type)
                               ? fileList.slice(0, MAX_NANO_BANANA_IMAGES)
                               : fileList;
                           return {
@@ -557,7 +604,7 @@ export const NodeTools = () => {
                         已选择: {testFiles[input.key].map((file) => file.name).join(', ')}
                       </div>
                     )}
-                    {isNanoBananaModel && isImageListInputType(input.type) && (
+                    {isNanoBananaModel && isAssetRefListType(input.type) && (
                       <div className={styles.fileHint}>最多支持 {MAX_NANO_BANANA_IMAGES} 张图片</div>
                     )}
                   </>
@@ -600,6 +647,13 @@ export const NodeTools = () => {
             <div className={styles.imagePreview}>
               {previewImages.map((url, index) => (
                 <img key={`${url}-${index}`} src={url} alt="Generated preview" />
+              ))}
+            </div>
+          )}
+          {previewVideos.length > 0 && (
+            <div className={styles.videoPreview}>
+              {previewVideos.map((url, index) => (
+                <video key={`${url}-${index}`} src={url} controls autoPlay muted loop />
               ))}
             </div>
           )}

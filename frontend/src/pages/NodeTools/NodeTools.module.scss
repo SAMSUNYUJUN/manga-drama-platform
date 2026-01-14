@@ -83,6 +83,21 @@
   color: var(--color-text-secondary);
 }
 
+.modelOptions {
+  background: var(--color-bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+
+  label {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+  }
+}
+
 .variableRow {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr auto auto;
@@ -131,4 +146,18 @@
   border: 1px solid var(--border-color);
   background: var(--color-bg-card);
   object-fit: cover;
+}
+
+.videoPreview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.videoPreview video {
+  width: 100%;
+  max-height: 320px;
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--color-bg-card);
 }

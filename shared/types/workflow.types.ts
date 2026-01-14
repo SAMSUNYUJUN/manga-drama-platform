@@ -10,12 +10,12 @@ export type WorkflowValueType =
   | 'number'
   | 'boolean'
   | 'json'
-  | 'image'
+  | 'asset_ref'
   | 'list<text>'
   | 'list<number>'
   | 'list<boolean>'
   | 'list<json>'
-  | 'list<image>';
+  | 'list<asset_ref>';
 
 export type WorkflowValue =
   | string

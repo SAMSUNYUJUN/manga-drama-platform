@@ -34,11 +34,11 @@ const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; 
   },
   [WorkflowNodeType.GENERATE_CHARACTER_IMAGES]: {
     inputs: [{ key: 'prompt', name: '角色提示', type: 'text', required: true }],
-    outputs: [{ key: 'images', name: '角色图片', type: 'list<image>', required: true }],
+    outputs: [{ key: 'images', name: '角色图片', type: 'list<asset_ref>', required: true }],
   },
   [WorkflowNodeType.HUMAN_REVIEW_ASSETS]: {
-    inputs: [{ key: 'assets', name: '候选资产', type: 'list<image>', required: true }],
-    outputs: [{ key: 'assets', name: '通过资产', type: 'list<image>', required: true }],
+    inputs: [{ key: 'assets', name: '候选资产', type: 'list<asset_ref>', required: true }],
+    outputs: [{ key: 'assets', name: '通过资产', type: 'list<asset_ref>', required: true }],
   },
   [WorkflowNodeType.HUMAN_BREAKPOINT]: {
     inputs: [{ key: 'candidates', name: '候选内容', type: 'list<text>', required: true }],
@@ -46,19 +46,19 @@ const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; 
   },
   [WorkflowNodeType.GENERATE_SCENE_IMAGE]: {
     inputs: [{ key: 'prompt', name: '场景提示', type: 'text', required: true }],
-    outputs: [{ key: 'image', name: '场景图', type: 'image', required: true }],
+    outputs: [{ key: 'image', name: '场景图', type: 'asset_ref', required: true }],
   },
   [WorkflowNodeType.GENERATE_KEYFRAMES]: {
     inputs: [{ key: 'prompt', name: '关键帧提示', type: 'text', required: true }],
-    outputs: [{ key: 'frames', name: '关键帧', type: 'list<image>', required: true }],
+    outputs: [{ key: 'frames', name: '关键帧', type: 'list<asset_ref>', required: true }],
   },
   [WorkflowNodeType.GENERATE_VIDEO]: {
     inputs: [{ key: 'prompt', name: '视频提示', type: 'text', required: true }],
-    outputs: [{ key: 'video', name: '视频', type: 'image', required: true }],
+    outputs: [{ key: 'video', name: '视频', type: 'asset_ref', required: true }],
   },
   [WorkflowNodeType.FINAL_COMPOSE]: {
-    inputs: [{ key: 'assets', name: '合成素材', type: 'list<image>', required: true }],
-    outputs: [{ key: 'final', name: '最终视频', type: 'image', required: true }],
+    inputs: [{ key: 'assets', name: '合成素材', type: 'list<asset_ref>', required: true }],
+    outputs: [{ key: 'final', name: '最终视频', type: 'asset_ref', required: true }],
   },
 };
 
