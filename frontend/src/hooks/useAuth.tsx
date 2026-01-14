@@ -3,7 +3,8 @@
  * @module hooks/useAuth
  */
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import type { User, LoginDto, RegisterDto } from '@shared/types/user.types';
 import { authService } from '../services';
 

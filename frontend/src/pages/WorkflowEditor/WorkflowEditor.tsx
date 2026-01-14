@@ -3,7 +3,7 @@
  * @module pages/WorkflowEditor
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import ReactFlow, {
   Background,
@@ -40,6 +40,15 @@ type EditorNodeData = {
   inputs?: WorkflowVariable[];
   outputs?: WorkflowVariable[];
   locked?: boolean;
+  toolId?: number;
+  toolName?: string;
+};
+
+// 扩展 Edge 类型以支持 sourceOutputKey 和 targetInputKey
+type EditorEdge = Edge & {
+  sourceOutputKey?: string;
+  targetInputKey?: string;
+  transform?: 'stringify' | 'parse_json';
 };
 
 const encodeHandleId = (value?: string) => (value ? encodeURIComponent(value) : value);
@@ -61,6 +70,10 @@ const isVideoUrl = (value?: string) => {
   if (value.startsWith('data:video/')) return true;
   return /\.(mp4|webm|mov|mkv)(\?|#|$)/i.test(value);
 };
+// 辅助函数：判断是否为图片输入类型（兼容 image 和旧的 asset_ref）
+const isImageInputType = (type?: string) => type === 'image' || type === 'asset_ref';
+const isImageListInputType = (type?: string) => type === 'list<image>' || type === 'list<asset_ref>';
+const isAnyImageInputType = (type?: string) => isImageInputType(type) || isImageListInputType(type);
 const readFileAsDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -74,12 +87,12 @@ const VARIABLE_TYPES: WorkflowValueType[] = [
   'number',
   'boolean',
   'json',
-  'asset_ref',
+  'image',
   'list<text>',
   'list<number>',
   'list<boolean>',
   'list<json>',
-  'list<asset_ref>',
+  'list<image>',
 ];
 
 const FIXED_LIBRARY = [WorkflowNodeType.HUMAN_BREAKPOINT];
@@ -93,6 +106,10 @@ const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; 
     inputs: [{ key: 'result', name: '最终输出', type: 'text', required: true }],
     outputs: [{ key: 'result', name: '最终输出', type: 'text', required: true }],
   },
+  [WorkflowNodeType.LLM_TOOL]: {
+    inputs: [],
+    outputs: [],
+  },
   [WorkflowNodeType.LLM_PARSE_SCRIPT]: {
     inputs: [{ key: 'script', name: '脚本输入', type: 'text', required: true }],
     outputs: [{ key: 'storyboard', name: '解析结果', type: 'text', required: true }],
@@ -103,11 +120,11 @@ const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; 
   },
   [WorkflowNodeType.GENERATE_CHARACTER_IMAGES]: {
     inputs: [{ key: 'prompt', name: '角色提示', type: 'text', required: true }],
-    outputs: [{ key: 'images', name: '角色图片', type: 'list<asset_ref>', required: true }],
+    outputs: [{ key: 'images', name: '角色图片', type: 'list<image>', required: true }],
   },
   [WorkflowNodeType.HUMAN_REVIEW_ASSETS]: {
-    inputs: [{ key: 'assets', name: '候选资产', type: 'list<asset_ref>', required: true }],
-    outputs: [{ key: 'assets', name: '通过资产', type: 'list<asset_ref>', required: true }],
+    inputs: [{ key: 'assets', name: '候选资产', type: 'list<image>', required: true }],
+    outputs: [{ key: 'assets', name: '通过资产', type: 'list<image>', required: true }],
   },
   [WorkflowNodeType.HUMAN_BREAKPOINT]: {
     inputs: [{ key: 'candidates', name: '候选内容', type: 'list<text>', required: true }],
@@ -115,19 +132,19 @@ const DEFAULT_VARIABLES: Record<WorkflowNodeType, { inputs: WorkflowVariable[]; 
   },
   [WorkflowNodeType.GENERATE_SCENE_IMAGE]: {
     inputs: [{ key: 'prompt', name: '场景提示', type: 'text', required: true }],
-    outputs: [{ key: 'image', name: '场景图', type: 'asset_ref', required: true }],
+    outputs: [{ key: 'image', name: '场景图', type: 'image', required: true }],
   },
   [WorkflowNodeType.GENERATE_KEYFRAMES]: {
     inputs: [{ key: 'prompt', name: '关键帧提示', type: 'text', required: true }],
-    outputs: [{ key: 'frames', name: '关键帧', type: 'list<asset_ref>', required: true }],
+    outputs: [{ key: 'frames', name: '关键帧', type: 'list<image>', required: true }],
   },
   [WorkflowNodeType.GENERATE_VIDEO]: {
     inputs: [{ key: 'prompt', name: '视频提示', type: 'text', required: true }],
-    outputs: [{ key: 'video', name: '视频', type: 'asset_ref', required: true }],
+    outputs: [{ key: 'video', name: '视频', type: 'image', required: true }],
   },
   [WorkflowNodeType.FINAL_COMPOSE]: {
-    inputs: [{ key: 'assets', name: '合成素材', type: 'list<asset_ref>', required: true }],
-    outputs: [{ key: 'final', name: '最终视频', type: 'asset_ref', required: true }],
+    inputs: [{ key: 'assets', name: '合成素材', type: 'list<image>', required: true }],
+    outputs: [{ key: 'final', name: '最终视频', type: 'image', required: true }],
   },
 };
 
@@ -217,27 +234,27 @@ const normalizeNodes = (nodes: Node<EditorNodeData>[]) =>
     };
   });
 
-const normalizeEdges = (nodes: Node<EditorNodeData>[], edges: Edge[]) => {
+const normalizeEdges = (nodes: Node<EditorNodeData>[], edges: EditorEdge[]): EditorEdge[] => {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   return edges.map((edge) => {
     const source = nodeMap.get(edge.source);
     const target = nodeMap.get(edge.target);
     const sourceKey =
-      (edge as any).sourceOutputKey ||
+      edge.sourceOutputKey ||
       decodeHandleId(edge.sourceHandle) ||
       source?.data?.outputs?.[0]?.key ||
       ((source?.data?.nodeType || source?.type) === WorkflowNodeType.START
         ? source?.data?.inputs?.[0]?.key
         : undefined);
     const targetKey =
-      (edge as any).targetInputKey || decodeHandleId(edge.targetHandle) || target?.data?.inputs?.[0]?.key;
+      edge.targetInputKey || decodeHandleId(edge.targetHandle) || target?.data?.inputs?.[0]?.key;
     return {
       ...edge,
       sourceHandle: sourceKey ? encodeHandleId(sourceKey) : undefined,
       targetHandle: targetKey ? encodeHandleId(targetKey) : undefined,
       sourceOutputKey: sourceKey,
       targetInputKey: targetKey,
-    } as Edge;
+    };
   });
 };
 
@@ -328,8 +345,13 @@ const EDGE_TYPES = {};
 export const WorkflowEditor = () => {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<EditorNodeData>>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<EditorNodeData>([]);
+  // 使用 any 绕过 reactflow 类型限制，因为我们需要在 edge 上存储额外属性
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]) as [
+    EditorEdge[],
+    React.Dispatch<React.SetStateAction<EditorEdge[]>>,
+    (changes: any) => void,
+  ];
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [promptVersions, setPromptVersions] = useState<PromptTemplateVersion[]>([]);
   const [nodeTools, setNodeTools] = useState<NodeTool[]>([]);
@@ -433,7 +455,7 @@ export const WorkflowEditor = () => {
     [workflowTestAssets],
   );
   const hasAssetTestInputs = useMemo(
-    () => startNodeInputs.some((input) => input.type === 'asset_ref' || input.type === 'list<asset_ref>'),
+    () => startNodeInputs.some((input) => isAnyImageInputType(input.type)),
     [startNodeInputs],
   );
 
@@ -517,7 +539,7 @@ export const WorkflowEditor = () => {
         return;
       }
 
-      const newEdge: Edge = {
+      const newEdge: EditorEdge = {
         id: `e-${connection.source}-${connection.target}-${Date.now()}`,
         source: connection.source,
         target: connection.target,
@@ -526,7 +548,7 @@ export const WorkflowEditor = () => {
         sourceOutputKey: sourceKey,
         targetInputKey: targetKey,
         transform: compatibility.transform,
-      } as Edge;
+      };
       setEdges((eds) => eds.concat(newEdge));
     },
     [nodes, setEdges, setNodes],
@@ -656,20 +678,20 @@ export const WorkflowEditor = () => {
     if (field === 'key' && previousKey && previousKey !== value) {
       setEdges((eds) =>
         eds.map((edge) => {
-          if (group === 'inputs' && edge.target === selectedNode.id && (edge as any).targetInputKey === previousKey) {
+          if (group === 'inputs' && edge.target === selectedNode.id && edge.targetInputKey === previousKey) {
             return {
               ...edge,
               targetHandle: encodeHandleId(value),
               targetInputKey: value,
-            } as Edge;
+            };
           }
-          const isSourceMatch = edge.source === selectedNode.id && (edge as any).sourceOutputKey === previousKey;
+          const isSourceMatch = edge.source === selectedNode.id && edge.sourceOutputKey === previousKey;
           if ((group === 'outputs' && isSourceMatch) || (group === 'inputs' && isStartNode && isSourceMatch)) {
             return {
               ...edge,
               sourceHandle: encodeHandleId(value),
               sourceOutputKey: value,
-            } as Edge;
+            };
           }
           return edge;
         }),
@@ -706,11 +728,11 @@ export const WorkflowEditor = () => {
       setEdges((eds) =>
         eds.filter((edge) => {
           if (group === 'inputs') {
-            const targetMatch = edge.target === selectedNode.id && (edge as any).targetInputKey === variable.key;
-            const startSourceMatch = isStartNode && edge.source === selectedNode.id && (edge as any).sourceOutputKey === variable.key;
+            const targetMatch = edge.target === selectedNode.id && edge.targetInputKey === variable.key;
+            const startSourceMatch = isStartNode && edge.source === selectedNode.id && edge.sourceOutputKey === variable.key;
             return !targetMatch && !startSourceMatch;
           }
-          return (edge as any).sourceOutputKey !== variable.key;
+          return edge.sourceOutputKey !== variable.key;
         }),
       );
     }
@@ -849,8 +871,10 @@ export const WorkflowEditor = () => {
       }
       inputs[input.key] = raw;
     });
+    const nodeType = selectedNode.data?.nodeType || selectedNode.type;
+    if (!nodeType) return;
     const payload = {
-      nodeType: selectedNode.data?.nodeType || selectedNode.type,
+      nodeType,
       config: selectedNode.data?.config || {},
       inputs,
     };
@@ -874,7 +898,7 @@ export const WorkflowEditor = () => {
     if (!value) {
       setEdges((eds) =>
         eds.filter(
-          (edge) => !(edge.target === selectedNode.id && (edge as any).targetInputKey === input.key),
+          (edge) => !(edge.target === selectedNode.id && edge.targetInputKey === input.key),
         ),
       );
       return;
@@ -885,7 +909,7 @@ export const WorkflowEditor = () => {
     const sourceNodeType = (sourceNode.data?.nodeType || sourceNode.type) as WorkflowNodeType;
     const sourceVars =
       sourceNodeType === WorkflowNodeType.START ? sourceNode.data?.inputs || [] : sourceNode.data?.outputs || [];
-    const sourceVar = sourceVars.find((item) => item.key === outputKey);
+    const sourceVar = sourceVars.find((item: WorkflowVariable) => item.key === outputKey);
     if (!sourceVar) return;
     const compatibility = getTypeCompatibility(sourceVar.type, input.type);
     if (!compatibility.ok) {
@@ -895,7 +919,7 @@ export const WorkflowEditor = () => {
     setEdges((eds) => {
       let updated = false;
       const next = eds.map((edge) => {
-        if (edge.target === selectedNode.id && (edge as any).targetInputKey === input.key) {
+        if (edge.target === selectedNode.id && edge.targetInputKey === input.key) {
           updated = true;
           return {
             ...edge,
@@ -905,7 +929,7 @@ export const WorkflowEditor = () => {
             targetHandle: encodeHandleId(input.key),
             targetInputKey: input.key,
             transform: compatibility.transform,
-          } as Edge;
+          };
         }
         return edge;
       });
@@ -919,7 +943,7 @@ export const WorkflowEditor = () => {
           sourceOutputKey: outputKey,
           targetInputKey: input.key,
           transform: compatibility.transform,
-        } as Edge);
+        });
       }
       return next;
     });
@@ -1028,7 +1052,7 @@ export const WorkflowEditor = () => {
   const handleWorkflowTestAssetSelect = (
     inputKey: string,
     value: string,
-    selectedOptions: HTMLOptionsCollection,
+    selectedOptions: HTMLCollectionOf<HTMLOptionElement>,
     isList: boolean,
   ) => {
     if (isList) {
@@ -1098,12 +1122,12 @@ export const WorkflowEditor = () => {
       startNodeInputs.forEach((input) => {
         if (!(input.key in next)) {
           const value = input.defaultValue;
-          const isAssetInput = input.type === 'asset_ref' || input.type === 'list<asset_ref>';
+          const isAssetInput = isAnyImageInputType(input.type);
           if (isAssetInput) {
             if (value !== undefined) {
               next[input.key] = value;
             } else {
-              next[input.key] = input.type === 'list<asset_ref>' ? [] : '';
+              next[input.key] = isImageListInputType(input.type) ? [] : '';
             }
             return;
           }
@@ -1405,10 +1429,10 @@ export const WorkflowEditor = () => {
                 const currentEdge = edges.find(
                   (edge) =>
                     edge.target === selectedNode.id &&
-                    (edge as any).targetInputKey === item.key,
+                    edge.targetInputKey === item.key,
                 );
                 const currentValue = currentEdge
-                  ? `${currentEdge.source}::${(currentEdge as any).sourceOutputKey}`
+                  ? `${currentEdge.source}::${currentEdge.sourceOutputKey}`
                   : '';
                 return (
                   <div key={`inputs-${index}`} className={styles.variableRow}>
@@ -1449,7 +1473,7 @@ export const WorkflowEditor = () => {
                       value={
                         item.defaultValue && typeof item.defaultValue === 'object'
                           ? JSON.stringify(item.defaultValue)
-                          : item.defaultValue ?? ''
+                          : (typeof item.defaultValue === 'boolean' ? String(item.defaultValue) : item.defaultValue ?? '')
                       }
                       onChange={(event) => handleVariableChange('inputs', index, 'defaultValue', event.target.value)}
                       placeholder="default"
@@ -1562,9 +1586,9 @@ export const WorkflowEditor = () => {
           {startNodeInputs.map((input) => (
             <div key={input.key} className={styles.testRow}>
               <label>{input.name || input.key}</label>
-              {input.type === 'asset_ref' || input.type === 'list<asset_ref>' ? (
+              {isAnyImageInputType(input.type) ? (
                 (() => {
-                  const isList = input.type === 'list<asset_ref>';
+                  const isList = isImageListInputType(input.type);
                   const rawValue = workflowTestInputs[input.key];
                   const selectedAssetIds = resolveTestInputAssetIds(rawValue);
                   const previewUrls = resolveTestInputMediaUrls(rawValue);

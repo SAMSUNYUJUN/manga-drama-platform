@@ -124,7 +124,7 @@ export const TaskWorkflow = () => {
     const assets = await workflowService.getReviewAssets(waitingNode.id);
     setReviewAssets(assets);
     const defaults: Record<number, 'approve' | 'reject'> = {};
-    assets.forEach((asset) => {
+    assets.forEach((asset: Asset) => {
       defaults[asset.id] = 'approve';
     });
     setReviewDecisions(defaults);

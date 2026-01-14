@@ -38,6 +38,27 @@ export class WorkflowValidationService {
       });
     }
 
+    // 检查节点名称唯一性（非 Start/End 节点）
+    const toolNodes = normalizedNodes.filter(
+      (node) => node.type !== WorkflowNodeType.START && node.type !== WorkflowNodeType.END,
+    );
+    const nodeNameOwners = new Map<string, string[]>();
+    toolNodes.forEach((node) => {
+      const nodeName = node.data?.label || node.label || node.id;
+      const owners = nodeNameOwners.get(nodeName) || [];
+      owners.push(node.id);
+      nodeNameOwners.set(nodeName, owners);
+    });
+    nodeNameOwners.forEach((owners, name) => {
+      if (owners.length > 1) {
+        errors.push({
+          code: 'duplicate_node_name',
+          message: `节点名称重复: ${name}，请为每个工具节点设置唯一名称`,
+          details: { nodeIds: owners, name },
+        });
+      }
+    });
+
     const outputKeyOwners = new Map<string, string[]>();
     normalizedNodes.forEach((node) => {
       const vars =

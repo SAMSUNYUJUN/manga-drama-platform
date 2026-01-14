@@ -17,12 +17,12 @@ const VARIABLE_TYPES: WorkflowValueType[] = [
   'number',
   'boolean',
   'json',
-  'asset_ref',
+  'image',
   'list<text>',
   'list<number>',
   'list<boolean>',
   'list<json>',
-  'list<asset_ref>',
+  'list<image>',
 ];
 
 const MAX_NANO_BANANA_IMAGES = 3;
@@ -32,6 +32,11 @@ const isImageUrl = (value?: string) => {
   if (value.startsWith('data:image/')) return true;
   return /\.(png|jpg|jpeg|gif|webp)(\?|#|$)/i.test(value);
 };
+
+// 辅助函数：判断是否为图片输入类型（兼容 image 和旧的 asset_ref）
+const isImageInputType = (type?: string) => type === 'image' || type === 'asset_ref';
+const isImageListInputType = (type?: string) => type === 'list<image>' || type === 'list<asset_ref>';
+const isAnyImageInputType = (type?: string) => isImageInputType(type) || isImageListInputType(type);
 
 type ToolForm = {
   id?: number;
@@ -257,7 +262,7 @@ export const NodeTools = () => {
   const handleTest = async () => {
     const parsedInputs: Record<string, any> = {};
     form.inputs.forEach((input) => {
-      const isAsset = input.type === 'asset_ref' || input.type === 'list<asset_ref>';
+      const isAsset = isAnyImageInputType(input.type);
       const fileList = testFiles[input.key];
       if (supportsAssetInput && isAsset && fileList && fileList.length) {
         return;
@@ -526,18 +531,18 @@ export const NodeTools = () => {
           {form.inputs.map((input) => (
             <div key={`test-${input.key}`} className={styles.testRow}>
               <label>{input.name || input.key}</label>
-              {input.type === 'asset_ref' || input.type === 'list<asset_ref>' ? (
+              {isAnyImageInputType(input.type) ? (
                 supportsAssetInput ? (
                   <>
                     <input
                       type="file"
                       accept="image/*"
-                      multiple={input.type === 'list<asset_ref>'}
+                      multiple={isImageListInputType(input.type)}
                       onChange={(event) =>
                         setTestFiles((prev) => {
                           const fileList = event.target.files ? Array.from(event.target.files) : [];
                           const limited =
-                            isNanoBananaModel && input.type === 'list<asset_ref>'
+                            isNanoBananaModel && isImageListInputType(input.type)
                               ? fileList.slice(0, MAX_NANO_BANANA_IMAGES)
                               : fileList;
                           return {
@@ -552,7 +557,7 @@ export const NodeTools = () => {
                         已选择: {testFiles[input.key].map((file) => file.name).join(', ')}
                       </div>
                     )}
-                    {isNanoBananaModel && input.type === 'list<asset_ref>' && (
+                    {isNanoBananaModel && isImageListInputType(input.type) && (
                       <div className={styles.fileHint}>最多支持 {MAX_NANO_BANANA_IMAGES} 张图片</div>
                     )}
                   </>

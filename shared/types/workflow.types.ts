@@ -44,7 +44,8 @@ export interface WorkflowValidationIssue {
     | 'unreachable_nodes'
     | 'cycles_not_allowed'
     | 'multiple_start_edges'
-    | 'duplicate_output_key';
+    | 'duplicate_output_key'
+    | 'duplicate_node_name';
   message: string;
   nodeId?: string;
   edgeId?: string;

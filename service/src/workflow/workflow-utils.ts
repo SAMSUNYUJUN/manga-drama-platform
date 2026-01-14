@@ -125,11 +125,14 @@ export const normalizeEdges = (nodes: WorkflowNode[], edges: WorkflowEdge[]): Wo
   return edges.map((edge) => {
     const source = nodeMap.get(edge.source);
     const target = nodeMap.get(edge.target);
+    // 兼容前端使用 sourceHandle/targetHandle 作为 key
+    const edgeAny = edge as any;
     const sourceKey =
       edge.sourceOutputKey ||
+      edgeAny.sourceHandle ||
       source?.data?.outputs?.[0]?.key ||
       (source?.type === WorkflowNodeType.START ? source?.data?.inputs?.[0]?.key : undefined);
-    const targetKey = edge.targetInputKey || target?.data?.inputs?.[0]?.key;
+    const targetKey = edge.targetInputKey || edgeAny.targetHandle || target?.data?.inputs?.[0]?.key;
     return {
       ...edge,
       sourceOutputKey: sourceKey,

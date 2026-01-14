@@ -39,15 +39,10 @@ export class OpenAICompatibleProvider {
       timeout: this.timeoutMs,
       family: 4, // Force IPv4
     });
-    
-    console.log(`[OpenAICompatibleProvider] Initialized with timeout=${this.timeoutMs}ms, retry=${this.retryCount}`);
   }
 
   async chatCompletions(payload: Record<string, any>): Promise<AxiosResponse<any>> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
-    console.log(`[OpenAICompatibleProvider] Making request to: ${url}`);
-    console.log(`[OpenAICompatibleProvider] Payload:`, JSON.stringify(payload).substring(0, 200));
-    console.log(`[OpenAICompatibleProvider] Request with timeout=${this.timeoutMs}ms`);
     return await this.requestWithRetry(() =>
       axios.post(url, payload, {
         headers: {

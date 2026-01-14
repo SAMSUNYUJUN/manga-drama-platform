@@ -44,6 +44,8 @@ import { User } from '../database/entities';
 import { StartWorkflowRunDto, ReviewDecisionDto, ReviewUploadDto, HumanSelectDto, CreateWorkflowRunDto, NodeTestDto, WorkflowTestDto } from './dto';
 import axios from 'axios';
 import * as path from 'path';
+import * as https from 'https';
+import * as http from 'http';
 import { WorkflowValidationService } from './workflow-validation.service';
 import { normalizeWorkflowVersion } from './workflow-utils';
 import { TrashService } from '../asset/trash.service';
@@ -944,6 +946,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             variables: renderVariables,
           });
           const providerType = await this.resolveToolProviderType(model, node, tool);
+          const nodeName = this.getNodeLabel(node);
           if (providerType === ProviderType.IMAGE || providerType === ProviderType.VIDEO) {
             const inputAssetUrls = await this.collectAssetUrlsFromInputs(inputVariables);
             const inputImages = await this.prepareInputImagesForModel(inputAssetUrls, model);
@@ -957,6 +960,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
               undefined,
               model,
               inputImages,
+              nodeName,
             );
             const assetIds = assets.map((asset) => asset.id);
             const assetUrls = assets.map((asset) => asset.url);
@@ -968,7 +972,29 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             };
           } else {
             const outputText = await this.aiService.generateText(rendered.rendered, model);
+            // 保存文本/JSON中间产物
+            const outputDef = node.data?.outputs?.[0];
+            const isJsonOutput = outputDef?.type === 'json';
+            let savedAsset: Asset | undefined;
+            if (isJsonOutput) {
+              try {
+                const parsed = JSON.parse(outputText);
+                savedAsset = await this.saveJsonAsset(
+                  run,
+                  AssetType.STORYBOARD_SCRIPT,
+                  `${nodeName}.json`,
+                  parsed,
+                  nodeName,
+                );
+              } catch {
+                // 如果解析失败，保存为文本
+                savedAsset = await this.saveTextAsset(run, AssetType.STORYBOARD_SCRIPT, outputText, nodeName);
+              }
+            } else {
+              savedAsset = await this.saveTextAsset(run, AssetType.STORYBOARD_SCRIPT, outputText, nodeName);
+            }
             nodeRun.output = {
+              assetIds: savedAsset ? [savedAsset.id] : [],
               variables: this.buildOutputVariables(node, outputText),
               logs: [],
             };
@@ -1018,6 +1044,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         case WorkflowNodeType.GENERATE_CHARACTER_IMAGES: {
           const prompt = await this.resolvePrompt(config, 'Character design');
           const count = config.outputCount || (process.env.AI_MODE === 'mock' ? 4 : 1);
+          const nodeName = this.getNodeLabel(node);
           const assets = await this.generateMediaAssets(
             run,
             AssetType.CHARACTER_DESIGN,
@@ -1026,6 +1053,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             'image',
             undefined,
             config.model,
+            undefined,
+            nodeName,
           );
           const assetIds = assets.map((asset) => asset.id);
           const assetUrls = assets.map((asset) => asset.url);
@@ -1077,6 +1106,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         }
         case WorkflowNodeType.GENERATE_SCENE_IMAGE: {
           const prompt = await this.resolvePrompt(config, 'Scene image');
+          const nodeName = this.getNodeLabel(node);
           const assets = await this.generateMediaAssets(
             run,
             AssetType.SCENE_IMAGE,
@@ -1085,6 +1115,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             'image',
             undefined,
             config.model,
+            undefined,
+            nodeName,
           );
           const assetIds = assets.map((asset) => asset.id);
           const assetUrls = assets.map((asset) => asset.url);
@@ -1103,6 +1135,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         case WorkflowNodeType.GENERATE_KEYFRAMES: {
           await this.updateTaskStage(run.taskId, run.taskVersionId, TaskStage.KEYFRAME_GENERATING);
           const prompt = await this.resolvePrompt(config, 'Keyframe');
+          const nodeName = this.getNodeLabel(node);
           const assets = await this.generateMediaAssets(
             run,
             AssetType.KEYFRAME_IMAGE,
@@ -1111,6 +1144,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             'image',
             undefined,
             config.model,
+            undefined,
+            nodeName,
           );
           const assetIds = assets.map((asset) => asset.id);
           const assetUrls = assets.map((asset) => asset.url);
@@ -1133,6 +1168,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           if (duration > 15) {
             throw new BadRequestException('Video duration exceeds 15s limit');
           }
+          const nodeName = this.getNodeLabel(node);
           const assets = await this.generateMediaAssets(
             run,
             AssetType.STORYBOARD_VIDEO,
@@ -1141,6 +1177,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             'video',
             { duration },
             config.model,
+            undefined,
+            nodeName,
           );
           nodeRun.output = {
             assetIds: assets.map((asset) => asset.id),
@@ -1551,18 +1589,26 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       const mimeType = parsed?.mimeType || this.guessMimeType(mediaType, ext);
       let storedUrl: string;
       let filesize: number | undefined;
-      if (parsed) {
-        storedUrl = await this.storageService.uploadBuffer(parsed.buffer, filename, {
-          folder,
-          contentType: mimeType,
-        });
-        filesize = parsed.buffer.length;
-      } else {
-        storedUrl = await this.storageService.uploadRemoteFile(url, filename, {
-          folder,
-          contentType: mimeType,
-        });
+      
+      try {
+        if (parsed) {
+          storedUrl = await this.storageService.uploadBuffer(parsed.buffer, filename, {
+            folder,
+            contentType: mimeType,
+          });
+          filesize = parsed.buffer.length;
+        } else {
+          storedUrl = await this.storageService.uploadRemoteFile(url, filename, {
+            folder,
+            contentType: mimeType,
+          });
+        }
+      } catch (e: any) {
+        // 下载或上传失败时，回退到直接使用原始 URL
+        console.warn(`[saveTestMediaAssets] 存储失败，回退使用原始URL: ${e?.message || e}`);
+        storedUrl = url;
       }
+      
       const assetType = mediaType === 'video' ? AssetType.LIBRARY_VIDEO : AssetType.LIBRARY_IMAGE;
       const asset = await this.assetRepository.save(
         this.assetRepository.create({
@@ -1593,123 +1639,72 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     outputs: Record<string, any>,
   ): Promise<{ outputs: Record<string, any>; assetIds: number[] }> {
     const outputDefs = node.data?.outputs || [];
-    const imageDefs = outputDefs.filter(
-      (output: any) => this.isImageValueType(output.type) || this.isImageListType(output.type),
-    );
-    if (!imageDefs.length) {
-      return { outputs, assetIds: [] };
-    }
-
-    const outputItems = new Map<string, Array<{ assetId?: number; url?: string }>>();
-    const assetIds = new Set<number>();
-    const urls = new Set<string>();
-
-    const pushItem = (key: string, item: any) => {
-      if (typeof item === 'number') {
-        assetIds.add(item);
-        outputItems.set(key, [...(outputItems.get(key) || []), { assetId: item }]);
-        return;
-      }
-      if (typeof item === 'string') {
-        if (this.isAssetUrl(item)) {
-          urls.add(item);
-          outputItems.set(key, [...(outputItems.get(key) || []), { url: item }]);
-          return;
-        }
-        const parsed = Number(item);
-        if (Number.isFinite(parsed)) {
-          assetIds.add(parsed);
-          outputItems.set(key, [...(outputItems.get(key) || []), { assetId: parsed }]);
-        }
-        return;
-      }
-      if (item && typeof item === 'object') {
-        const url = item.image_url?.url || item.url;
-        if (typeof url === 'string' && this.isAssetUrl(url)) {
-          urls.add(url);
-          outputItems.set(key, [...(outputItems.get(key) || []), { url }]);
-        }
-      }
-    };
-
-    imageDefs.forEach((output: any) => {
-      const value = outputs?.[output.key];
-      if (value === undefined || value === null) return;
-      if (Array.isArray(value)) {
-        value.forEach((item) => pushItem(output.key, item));
-      } else {
-        pushItem(output.key, value);
-      }
-    });
-
-    if (!outputItems.size) {
-      return { outputs, assetIds: [] };
-    }
-
-    const assetsById = assetIds.size
-      ? await this.assetRepository.find({ where: { id: In(Array.from(assetIds)) } })
-      : [];
-    const assetById = new Map(assetsById.map((asset) => [asset.id, asset]));
-    const assetsByUrl = urls.size
-      ? await this.assetRepository.find({ where: { url: In(Array.from(urls)) } })
-      : [];
-    const assetByUrl = new Map(assetsByUrl.map((asset) => [asset.url, asset]));
-
-    const spaceId = await this.getWorkflowSpaceId(run);
-    const savedByUrl = new Map<string, Asset>();
     const resolvedOutputs = { ...outputs };
     const savedAssetIds: number[] = [];
+    const spaceId = await this.getWorkflowSpaceId(run);
+    const nodeName = 'END';
 
-    for (const output of imageDefs) {
-      const items = outputItems.get(output.key) || [];
-      if (!items.length) continue;
-      const resolvedUrls: string[] = [];
-      for (const item of items) {
-        if (item.assetId !== undefined) {
-          const asset = assetById.get(item.assetId);
-          if (!asset) continue;
-          if (this.inferMediaType(asset.url, asset.mimeType) !== 'image') continue;
-          if (spaceId && asset.spaceId !== spaceId) {
-            const saved = await this.saveOutputImageAsset(run, asset.url, {
-              sourceAssetId: asset.id,
-              sourceUrl: asset.url,
+    // 处理所有输出类型
+    for (const outputDef of outputDefs) {
+      const value = outputs?.[outputDef.key];
+      if (value === undefined || value === null) continue;
+
+      const type = outputDef.type as string;
+      
+      // image/list<image> 类型保存图片资产
+      if (this.isImageValueType(type) || this.isImageListType(type)) {
+        const urls = Array.isArray(value) ? value : [value];
+        const resolvedUrls: string[] = [];
+        
+        for (const item of urls) {
+          if (typeof item === 'number') {
+            // 已保存的 asset id
+            const asset = await this.assetRepository.findOne({ where: { id: item } });
+            if (asset) {
+              resolvedUrls.push(asset.url);
+              savedAssetIds.push(asset.id);
+            }
+          } else if (typeof item === 'string' && this.isAssetUrl(item)) {
+            // 保存 URL 图片
+            const saved = await this.saveOutputImageAsset(run, item, {
               nodeId: node.id,
-              outputKey: output.key,
-            });
+              outputKey: outputDef.key,
+            }, nodeName);
             resolvedUrls.push(saved.url);
             savedAssetIds.push(saved.id);
-            continue;
           }
-          resolvedUrls.push(asset.url);
-          savedAssetIds.push(asset.id);
-          continue;
         }
-        if (item.url) {
-          if (this.inferMediaType(item.url) !== 'image') continue;
-          const existing = assetByUrl.get(item.url);
-          if (existing && (!spaceId || existing.spaceId === spaceId)) {
-            resolvedUrls.push(existing.url);
-            savedAssetIds.push(existing.id);
-            continue;
-          }
-          const cached = savedByUrl.get(item.url);
-          if (cached) {
-            resolvedUrls.push(cached.url);
-            savedAssetIds.push(cached.id);
-            continue;
-          }
-          const saved = await this.saveOutputImageAsset(run, item.url, {
-            sourceUrl: item.url,
-            nodeId: node.id,
-            outputKey: output.key,
-          });
-          savedByUrl.set(item.url, saved);
-          resolvedUrls.push(saved.url);
-          savedAssetIds.push(saved.id);
+        
+        if (resolvedUrls.length) {
+          resolvedOutputs[outputDef.key] = this.isImageListType(type) ? resolvedUrls : resolvedUrls[0];
         }
       }
-      if (resolvedUrls.length) {
-        resolvedOutputs[output.key] = this.isImageListType(output.type) ? resolvedUrls : resolvedUrls[0];
+      // json 类型保存 JSON 文件
+      else if (type === 'json') {
+        const jsonContent = typeof value === 'string' ? value : JSON.stringify(value);
+        const asset = await this.saveJsonAsset(
+          run,
+          AssetType.STORYBOARD_SCRIPT,
+          `${nodeName}_${outputDef.key}.json`,
+          typeof value === 'string' ? JSON.parse(value) : value,
+          `${nodeName}_${outputDef.key}`,
+        );
+        savedAssetIds.push(asset.id);
+        resolvedOutputs[`${outputDef.key}_assetId`] = asset.id;
+        resolvedOutputs[`${outputDef.key}_url`] = asset.url;
+      }
+      // text 类型保存文本文件
+      else if (type === 'text') {
+        const textContent = typeof value === 'string' ? value : JSON.stringify(value);
+        const asset = await this.saveTextAsset(
+          run,
+          AssetType.STORYBOARD_SCRIPT,
+          textContent,
+          `${nodeName}_${outputDef.key}`,
+        );
+        savedAssetIds.push(asset.id);
+        resolvedOutputs[`${outputDef.key}_assetId`] = asset.id;
+        resolvedOutputs[`${outputDef.key}_url`] = asset.url;
       }
     }
 
@@ -1720,6 +1715,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     run: WorkflowRun,
     sourceUrl: string,
     metadata: Record<string, any>,
+    nodeName?: string,
   ): Promise<Asset> {
     const parsed = this.parseDataUri(sourceUrl);
     if (parsed) {
@@ -1732,6 +1728,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         { data: parsed.buffer, mimeType: parsed.mimeType },
         'image',
         metadata,
+        nodeName,
       );
     }
     const ext = this.inferExtension('image', undefined, sourceUrl);
@@ -1742,6 +1739,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       { url: sourceUrl, mimeType },
       'image',
       metadata,
+      nodeName,
     );
   }
 
@@ -1835,17 +1833,28 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     if (url.startsWith('data:')) {
       throw new BadRequestException('仅支持图片作为输入');
     }
-    const response = await axios.get<ArrayBuffer>(url, {
-      responseType: 'arraybuffer',
-      timeout: 30000,
-    });
-    const contentType =
-      (response.headers['content-type'] as string | undefined) || 'image/png';
-    if (!contentType.startsWith('image/')) {
-      throw new BadRequestException('仅支持图片作为输入');
+    // Force IPv4 to avoid ETIMEDOUT issues on some networks
+    const httpsAgent = new https.Agent({ family: 4, timeout: 60000 });
+    const httpAgent = new http.Agent({ family: 4, timeout: 60000 });
+    try {
+      const response = await axios.get<ArrayBuffer>(url, {
+        responseType: 'arraybuffer',
+        timeout: 60000,
+        httpsAgent,
+        httpAgent,
+        maxRedirects: 5,
+      });
+      const contentType =
+        (response.headers['content-type'] as string | undefined) || 'image/png';
+      if (!contentType.startsWith('image/')) {
+        throw new BadRequestException('仅支持图片作为输入');
+      }
+      const base64 = Buffer.from(response.data).toString('base64');
+      return `data:${contentType};base64,${base64}`;
+    } catch (err: any) {
+      console.error('[toImageDataUri] Error downloading image:', err.message, 'status:', err.response?.status);
+      throw err;
     }
-    const base64 = Buffer.from(response.data).toString('base64');
-    return `data:${contentType};base64,${base64}`;
   }
 
   private async getInputAssets(runId: number): Promise<Asset[]> {
@@ -1883,6 +1892,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     metadata?: Record<string, any>,
     modelOverride?: string,
     inputImages?: string[],
+    nodeName?: string,
   ): Promise<Asset[]> {
     const assets: Asset[] = [];
     for (let i = 0; i < count; i += 1) {
@@ -1893,7 +1903,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       if (!media.length) {
         throw new BadRequestException('AI provider returned no media');
       }
-      const saved = await this.saveMediaResult(run, type, media[0], mediaType, metadata);
+      const saved = await this.saveMediaResult(run, type, media[0], mediaType, metadata, nodeName);
       assets.push(saved);
     }
     return assets;
@@ -1905,6 +1915,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     media: { url?: string; data?: Buffer; mimeType?: string },
     mediaType: 'image' | 'video',
     metadata?: Record<string, any>,
+    nodeName?: string,
   ): Promise<Asset> {
     const task = await this.taskRepository.findOne({ where: { id: run.taskId } });
     const version = await this.taskVersionRepository.findOne({ where: { id: run.taskVersionId } });
@@ -1912,7 +1923,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
 
     const spaceId = await this.getWorkflowSpaceId(run);
     const folder = this.buildAssetFolder(task.userId, task.id, version.id, type, spaceId);
-    const filename = this.buildFilename(type, mediaType === 'image' ? 'png' : 'mp4');
+    const filenamePrefix = nodeName || type;
+    const filename = this.buildFilename(filenamePrefix, mediaType === 'image' ? 'png' : 'mp4');
     let url: string;
     let mimeType = media.mimeType || (mediaType === 'image' ? 'image/png' : 'video/mp4');
     if (media.url) {
@@ -1934,7 +1946,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         filename,
         filesize: media.data?.length,
         mimeType,
-        metadataJson: JSON.stringify({ prompt, ...(metadata || {}) }),
+        metadataJson: JSON.stringify({ prompt, nodeName, ...(metadata || {}) }),
       }),
     );
   }
@@ -1944,6 +1956,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     type: AssetType,
     filename: string,
     payload: any,
+    nodeName?: string,
   ): Promise<Asset> {
     const task = await this.taskRepository.findOne({ where: { id: run.taskId } });
     const version = await this.taskVersionRepository.findOne({ where: { id: run.taskVersionId } });
@@ -1951,8 +1964,9 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
 
     const spaceId = await this.getWorkflowSpaceId(run);
     const folder = this.buildAssetFolder(task.userId, task.id, version.id, type, spaceId);
+    const actualFilename = nodeName ? this.buildFilename(nodeName, 'json') : filename;
     const buffer = Buffer.from(JSON.stringify(payload, null, 2));
-    const url = await this.storageService.uploadBuffer(buffer, filename, {
+    const url = await this.storageService.uploadBuffer(buffer, actualFilename, {
       folder,
       contentType: 'application/json',
       isPublic: false,
@@ -1966,9 +1980,46 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         type,
         status: AssetStatus.ACTIVE,
         url,
-        filename,
+        filename: actualFilename,
         filesize: buffer.length,
         mimeType: 'application/json',
+        metadataJson: nodeName ? JSON.stringify({ nodeName }) : undefined,
+      }),
+    );
+  }
+
+  private async saveTextAsset(
+    run: WorkflowRun,
+    type: AssetType,
+    content: string,
+    nodeName?: string,
+  ): Promise<Asset> {
+    const task = await this.taskRepository.findOne({ where: { id: run.taskId } });
+    const version = await this.taskVersionRepository.findOne({ where: { id: run.taskVersionId } });
+    if (!task || !version) throw new NotFoundException('Task not found');
+
+    const spaceId = await this.getWorkflowSpaceId(run);
+    const folder = this.buildAssetFolder(task.userId, task.id, version.id, type, spaceId);
+    const filename = this.buildFilename(nodeName || type, 'txt');
+    const buffer = Buffer.from(content, 'utf-8');
+    const url = await this.storageService.uploadBuffer(buffer, filename, {
+      folder,
+      contentType: 'text/plain; charset=utf-8',
+      isPublic: false,
+    });
+
+    return await this.assetRepository.save(
+      this.assetRepository.create({
+        taskId: task.id,
+        versionId: version.id,
+        spaceId,
+        type,
+        status: AssetStatus.ACTIVE,
+        url,
+        filename,
+        filesize: buffer.length,
+        mimeType: 'text/plain',
+        metadataJson: nodeName ? JSON.stringify({ nodeName }) : undefined,
       }),
     );
   }
@@ -2011,7 +2062,13 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
   }
 
   private buildFilename(prefix: string, ext: string): string {
-    return `${prefix}_${Date.now()}.${ext}`;
+    // 清理前缀，移除不安全字符
+    const safePrefix = prefix.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, '_').slice(0, 50);
+    return `${safePrefix}_${Date.now()}.${ext}`;
+  }
+
+  private getNodeLabel(node: any): string {
+    return node.data?.label || node.label || node.data?.toolName || node.id;
   }
 
   private async fetchText(url: string): Promise<string> {

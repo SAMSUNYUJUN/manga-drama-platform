@@ -3,7 +3,8 @@
  * @module pages/Auth/Login
  */
 
-import { useState, FormEvent } from 'react';
+import { useState } from 'react';
+import type { FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import styles from './Auth.module.scss';
