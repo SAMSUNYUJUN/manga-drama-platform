@@ -195,7 +195,7 @@ export const Assets = () => {
             {assets.map((asset) => (
               <div key={asset.id} className={styles.item}>
                 <div>
-                  <div className={styles.title}>#{asset.id} {asset.filename}</div>
+                  <div className={styles.title}>{asset.filename}</div>
                   <div className={styles.meta}>{asset.type}</div>
                 </div>
                 <div className={styles.actions}>

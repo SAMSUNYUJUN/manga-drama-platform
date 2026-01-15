@@ -559,6 +559,21 @@ export const WorkflowEditor = () => {
     event.dataTransfer.effectAllowed = 'move';
   };
 
+  const generateUniqueNodeName = useCallback(
+    (baseName: string) => {
+      const existingNames = new Set(
+        nodes.map((n) => n.data?.label || n.data?.toolName || '').filter(Boolean),
+      );
+      if (!existingNames.has(baseName)) return baseName;
+      let counter = 2;
+      while (existingNames.has(`${baseName}${counter}`)) {
+        counter++;
+      }
+      return `${baseName}${counter}`;
+    },
+    [nodes],
+  );
+
   const onDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
@@ -569,12 +584,13 @@ export const WorkflowEditor = () => {
         const toolId = Number(payload.replace('tool:', ''));
         const tool = nodeTools.find((item) => item.id === toolId);
         if (!tool) return;
+        const uniqueName = generateUniqueNodeName(tool.name);
         const newNode: Node<EditorNodeData> = {
           id: `tool-${tool.id}-${Date.now()}`,
           type: WorkflowNodeType.LLM_TOOL,
           position,
           data: {
-            label: tool.name,
+            label: uniqueName,
             nodeType: WorkflowNodeType.LLM_TOOL,
             toolId: tool.id,
             toolName: tool.name,
@@ -592,12 +608,13 @@ export const WorkflowEditor = () => {
 
       const type = payload as WorkflowNodeType;
       const defaults = DEFAULT_VARIABLES[type];
+      const uniqueName = generateUniqueNodeName(type);
       const newNode: Node<EditorNodeData> = {
         id: `${type}-${Date.now()}`,
         type: type,
         position,
         data: {
-          label: type,
+          label: uniqueName,
           nodeType: type,
           config: {
             outputCount: 1,
@@ -609,7 +626,7 @@ export const WorkflowEditor = () => {
       };
       setNodes((nds) => normalizeNodes(nds.concat(newNode)));
     },
-    [nodeTools, setNodes],
+    [nodeTools, setNodes, generateUniqueNodeName],
   );
 
   const onDragOver = (event: React.DragEvent<HTMLDivElement>) => {
@@ -668,8 +685,16 @@ export const WorkflowEditor = () => {
         if (node.id !== selectedNode.id) return node;
         const list = [...(node.data[group] || [])];
         const updated = { ...list[index], [field]: value };
-        if (field === 'key' && (previousName === undefined || previousName === '' || previousName === previousKey)) {
-          updated.name = value;
+        // 当修改 key 时，如果 name 与 key 相同或未自定义，则同步更新 name
+        if (field === 'key') {
+          const isNameSameAsKey = previousName === previousKey;
+          const isNameDefault = previousName === undefined || previousName === '';
+          // 也检查默认名称（如"输入文本"、"最终输出"等）
+          const defaultNames = ['输入文本', '最终输出', '脚本输入', '解析结果', '候选内容', '选择结果'];
+          const isDefaultName = defaultNames.includes(previousName || '');
+          if (isNameSameAsKey || isNameDefault || isDefaultName) {
+            updated.name = value;
+          }
         }
         list[index] = updated;
         return { ...node, data: { ...node.data, [group]: list } };
@@ -1292,15 +1317,27 @@ export const WorkflowEditor = () => {
             <label>节点名称</label>
             <input
               value={selectedNode.data.label || ''}
-              onChange={(event) =>
+              onChange={(event) => {
+                const newLabel = event.target.value;
+                // 检查名称唯一性
+                const isDuplicate = nodes.some(
+                  (n) => n.id !== selectedNode.id && (n.data?.label || n.data?.toolName || '') === newLabel,
+                );
                 setNodes((nds) =>
                   nds.map((node) =>
                     node.id === selectedNode.id
-                      ? { ...node, data: { ...node.data, label: event.target.value } }
+                      ? { ...node, data: { ...node.data, label: newLabel } }
                       : node,
                   ),
-                )
-              }
+                );
+                if (isDuplicate && newLabel) {
+                  // 显示警告但不阻止修改
+                  setLoadError('节点名称已存在，请使用唯一的名称');
+                  setTimeout(() => setLoadError(''), 3000);
+                } else {
+                  setLoadError('');
+                }
+              }}
             />
 
             {!isStartOrEnd && !isToolNode && (
@@ -1622,7 +1659,7 @@ export const WorkflowEditor = () => {
                             {!isList && <option value="">-- 选择空间资产 --</option>}
                             {workflowTestSelectableAssets.map((asset) => (
                               <option key={asset.id} value={String(asset.id)}>
-                                #{asset.id} {asset.filename}
+                                {asset.filename}
                               </option>
                             ))}
                           </select>

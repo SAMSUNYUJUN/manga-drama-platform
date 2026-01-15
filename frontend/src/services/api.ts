@@ -16,7 +16,7 @@ const API_BASE_URL = rawBaseUrl.startsWith('http')
 // 创建axios实例
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 300000, // 5 minutes for AI operations
+  timeout: 600000, // 10 minutes for long AI operations (video generation)
   headers: {
     'Content-Type': 'application/json',
   },
@@ -92,7 +92,12 @@ api.interceptors.response.use(
     }
 
     if (error.request) {
-      const enhancedError = new Error('Network error. Please check your connection.') as Error & {
+      // 区分超时和网络错误
+      let message = 'Network error. Please check your connection.';
+      if (isTimeout) {
+        message = 'Request timed out. The operation may still be running on the server.';
+      }
+      const enhancedError = new Error(message) as Error & {
         url?: string;
         code?: string;
         isTimeout?: boolean;

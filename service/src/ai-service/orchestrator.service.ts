@@ -3,7 +3,7 @@
  * @module ai-service
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -11,6 +11,9 @@ import { ProviderConfig, GlobalConfig } from '../database/entities';
 import { ProviderType } from '@shared/constants';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 import { JimengVideoProvider } from './providers/jimeng-video.provider';
+import axios from 'axios';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface MediaResult {
   url?: string;
@@ -173,13 +176,76 @@ export class AiOrchestratorService {
       maxPollAttempts: 120, // 10 minutes max
     });
     
+    // 处理本地 URL - 转换为 data URI
+    const processedImages = await this.prepareImagesForJimeng(inputImages || []);
+    
     const result = await jimengProvider.generateVideo(
       prompt,
       aspectRatio || '16:9',
-      inputImages || [],
+      processedImages,
     );
     
     return [{ url: result.videoUrl, mimeType: 'video/mp4' }];
+  }
+
+  /**
+   * 准备即梦视频 API 所需的图片
+   * 本地 URL 转换为 data URI（即梦 API 支持 base64 格式）
+   */
+  private async prepareImagesForJimeng(urls: string[]): Promise<string[]> {
+    const results: string[] = [];
+    
+    for (const url of urls) {
+      if (this.isLocalUrl(url)) {
+        // 将本地 URL 转换为 data URI
+        const dataUri = await this.localUrlToDataUri(url);
+        results.push(dataUri);
+      } else if (url.startsWith('data:')) {
+        // 已经是 data URI
+        results.push(url);
+      } else {
+        // 外部可访问的 URL，直接使用
+        results.push(url);
+      }
+    }
+    
+    return results;
+  }
+
+  private isLocalUrl(url: string): boolean {
+    return url.includes('localhost') || 
+           url.includes('127.0.0.1') || 
+           url.startsWith('/uploads/');
+  }
+
+  private async localUrlToDataUri(url: string): Promise<string> {
+    // 从 URL 中提取本地文件路径
+    let filePath: string;
+    
+    if (url.includes('/uploads/')) {
+      // URL 格式: http://localhost:3001/uploads/... 或 /uploads/...
+      const uploadsIndex = url.indexOf('/uploads/');
+      const relativePath = url.substring(uploadsIndex);
+      filePath = path.join(process.cwd(), '..', 'storage', relativePath);
+    } else {
+      throw new BadRequestException(`无法处理的本地 URL: ${url}`);
+    }
+    
+    // 检查文件是否存在
+    if (!fs.existsSync(filePath)) {
+      throw new BadRequestException(`文件不存在: ${filePath}`);
+    }
+    
+    // 读取文件并转换为 base64
+    const buffer = fs.readFileSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    let mimeType = 'image/jpeg';
+    if (ext === '.png') mimeType = 'image/png';
+    else if (ext === '.gif') mimeType = 'image/gif';
+    else if (ext === '.webp') mimeType = 'image/webp';
+    
+    const base64 = buffer.toString('base64');
+    return `data:${mimeType};base64,${base64}`;
   }
 
   private isJimengVideoModel(model?: string): boolean {

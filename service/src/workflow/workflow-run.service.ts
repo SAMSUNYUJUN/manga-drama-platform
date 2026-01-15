@@ -129,6 +129,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
   }
 
   async startRun(taskId: number, versionId: number, dto: StartWorkflowRunDto, user: User) {
+    console.log(`[startRun] dto.startInputs: ${JSON.stringify(dto.startInputs)}`);
     const { task, version } = await this.ensureTaskAccess(taskId, versionId, user);
     const templateVersion = await this.versionRepository.findOne({
       where: { id: dto.templateVersionId },
@@ -146,7 +147,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       taskId,
       taskVersionId: versionId,
       status: WorkflowRunStatus.PENDING,
-      input: dto.startInputs,
+      inputJson: dto.startInputs ? JSON.stringify(dto.startInputs) : null,
     });
     const savedRun = await this.runRepository.save(run);
     try {
@@ -597,7 +598,6 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     const outputsMap = new Map<string, Record<string, any>>();
     const nodeResults: WorkflowTestNodeResult[] = [];
-    const order = this.resolveNodeOrder(nodes, edges);
     const startNode = nodes.find((node) => node.type === WorkflowNodeType.START);
     const endNode = nodes.find((node) => node.type === WorkflowNodeType.END);
     let testSpaceId: number | null = null;
@@ -607,6 +607,27 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       testSpaceId = template?.spaceId ?? null;
     }
 
+    // 构建依赖图
+    const inDegree: Record<string, number> = {};
+    const dependents: Record<string, string[]> = {};
+    
+    nodes.forEach((node) => {
+      inDegree[node.id] = 0;
+      dependents[node.id] = [];
+    });
+    
+    edges.forEach((edge) => {
+      inDegree[edge.target] = (inDegree[edge.target] || 0) + 1;
+      dependents[edge.source] = dependents[edge.source] || [];
+      dependents[edge.source].push(edge.target);
+    });
+
+    const remainingInDegree = { ...inDegree };
+    const completedNodes = new Set<string>();
+    let failedNodeId: string | undefined;
+    let failedError: string | undefined;
+
+    // 处理 START 节点
     if (startNode) {
       const startInputs = this.applyDefaultInputs(startNode, dto.startInputs || {});
       outputsMap.set(startNode.id, startInputs);
@@ -617,11 +638,27 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         outputs: startInputs,
         durationMs: 0,
       });
+      completedNodes.add(startNode.id);
+      // 更新下游节点入度
+      for (const dep of dependents[startNode.id] || []) {
+        remainingInDegree[dep] -= 1;
+      }
     }
 
-    for (const nodeId of order) {
-      const node = nodeMap.get(nodeId);
-      if (!node || node.type === WorkflowNodeType.START) continue;
+    // 获取当前可执行的节点
+    const getReadyNodes = (): string[] => {
+      return nodes
+        .filter((n) => 
+          remainingInDegree[n.id] === 0 && 
+          !completedNodes.has(n.id) && 
+          n.type !== WorkflowNodeType.START
+        )
+        .map((n) => n.id);
+    };
+
+    // 执行单个节点
+    const executeTestNode = async (nodeId: string) => {
+      const node = nodeMap.get(nodeId)!;
       const inputs = this.resolveTestInputs(node, edges, nodeMap, outputsMap);
       let outputs: Record<string, any> = {};
       let error: string | undefined;
@@ -629,8 +666,22 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
 
       if (node.type === WorkflowNodeType.HUMAN_BREAKPOINT) {
         outputs = this.resolveBreakpointOutput(node, inputs);
+        nodeResults.push({
+          nodeId: node.id,
+          nodeType: node.type,
+          inputs,
+          outputs,
+          durationMs,
+        });
       } else if (node.type === WorkflowNodeType.END) {
         outputs = this.buildOutputVariables(node, inputs);
+        nodeResults.push({
+          nodeId: node.id,
+          nodeType: node.type,
+          inputs,
+          outputs,
+          durationMs,
+        });
       } else {
         const result = await this.runWorkflowNodeTest(node, inputs);
         durationMs = result.durationMs;
@@ -658,31 +709,50 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         });
       }
 
-      if (node.type === WorkflowNodeType.HUMAN_BREAKPOINT || node.type === WorkflowNodeType.END) {
-        nodeResults.push({
-          nodeId: node.id,
-          nodeType: node.type,
-          inputs,
-          outputs,
-          durationMs,
-        });
+      return { nodeId, outputs, error };
+    };
+
+    // 主循环：按层级并行执行
+    while (true) {
+      const readyNodes = getReadyNodes();
+      
+      if (readyNodes.length === 0) {
+        break; // 没有更多可执行的节点
       }
 
-      outputsMap.set(node.id, outputs);
-      if (error) {
-        return {
-          ok: false,
-          endNodeId: endNode?.id,
-          finalOutput: endNode ? outputsMap.get(endNode.id) : outputs,
-          nodeResults,
-          error,
-          failedNodeId: node.id,
-          durationMs: Date.now() - startedAt,
-        };
+      console.log(`[testWorkflow] Executing batch: [${readyNodes.join(', ')}]`);
+      
+      // 并行执行当前批次的所有节点
+      const results = await Promise.all(readyNodes.map(executeTestNode));
+      
+      // 处理结果
+      for (const result of results) {
+        outputsMap.set(result.nodeId, result.outputs);
+        
+        if (result.error) {
+          failedNodeId = result.nodeId;
+          failedError = result.error;
+          // 失败时立即返回
+          return {
+            ok: false,
+            endNodeId: endNode?.id,
+            finalOutput: endNode ? outputsMap.get(endNode.id) : result.outputs,
+            nodeResults,
+            error: failedError,
+            failedNodeId,
+            durationMs: Date.now() - startedAt,
+          };
+        }
+        
+        completedNodes.add(result.nodeId);
+        // 更新下游节点入度
+        for (const dep of dependents[result.nodeId] || []) {
+          remainingInDegree[dep] -= 1;
+        }
       }
     }
 
-    const finalOutput = endNode ? outputsMap.get(endNode.id) : outputsMap.get(order[order.length - 1] || '');
+    const finalOutput = endNode ? outputsMap.get(endNode.id) : undefined;
     return {
       ok: true,
       endNodeId: endNode?.id,
@@ -851,36 +921,130 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       if (!templateVersion) return;
 
       const { nodes, edges } = normalizeWorkflowVersion(templateVersion.nodes, templateVersion.edges);
-      const order = this.resolveNodeOrder(nodes, edges);
-      for (const nodeId of order) {
+      
+      // 构建依赖图
+      const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+      const inDegree: Record<string, number> = {};
+      const dependents: Record<string, string[]> = {}; // 每个节点完成后需要通知的下游节点
+      
+      nodes.forEach((node) => {
+        inDegree[node.id] = 0;
+        dependents[node.id] = [];
+      });
+      
+      edges.forEach((edge) => {
+        inDegree[edge.target] = (inDegree[edge.target] || 0) + 1;
+        dependents[edge.source] = dependents[edge.source] || [];
+        dependents[edge.source].push(edge.target);
+      });
+
+      // 跟踪每个节点的剩余入度（动态更新）
+      const remainingInDegree = { ...inDegree };
+      const completedNodes = new Set<string>();
+      const failedNodes = new Set<string>();
+      let paused = false;
+
+      // 获取当前可执行的节点（入度为0且未完成）
+      const getReadyNodes = (): string[] => {
+        return nodes
+          .filter((n) => remainingInDegree[n.id] === 0 && !completedNodes.has(n.id) && !failedNodes.has(n.id))
+          .map((n) => n.id);
+      };
+
+      // 并行执行一批节点
+      const executeBatch = async (nodeIds: string[]): Promise<boolean> => {
+        const tasks = nodeIds.map(async (nodeId) => {
+          const node = nodeMap.get(nodeId);
+          if (!node) return { nodeId, success: true, paused: false };
+
+          const nodeRun = await this.nodeRunRepository.findOne({
+            where: { workflowRunId: runId, nodeId: node.id },
+          });
+          if (!nodeRun) return { nodeId, success: true, paused: false };
+
+          // 已完成的跳过
+          if (nodeRun.status === NodeRunStatus.SUCCEEDED) {
+            return { nodeId, success: true, paused: false };
+          }
+
+          // 等待人工或暂停的节点
+          if (nodeRun.status === NodeRunStatus.WAITING_HUMAN || nodeRun.status === NodeRunStatus.PAUSED) {
+            return { nodeId, success: true, paused: true };
+          }
+
+          console.log(`[executeRun] Executing node: ${nodeId} (${node.type})`);
+          
+          try {
+            const result = await this.executeNode(run, node, nodeRun, nodes, edges);
+            
+            if (result.status === NodeRunStatus.WAITING_HUMAN || result.status === NodeRunStatus.PAUSED) {
+              return { nodeId, success: true, paused: true };
+            }
+            if (result.status === NodeRunStatus.FAILED) {
+              return { nodeId, success: false, error: result.error, paused: false };
+            }
+            
+            console.log(`[executeRun] Node completed: ${nodeId}`);
+            return { nodeId, success: true, paused: false };
+          } catch (error: any) {
+            console.error(`[executeRun] Node failed: ${nodeId}`, error?.message);
+            return { nodeId, success: false, error: error?.message, paused: false };
+          }
+        });
+
+        const results = await Promise.all(tasks);
+        
+        // 处理结果
+        for (const result of results) {
+          if (result.paused) {
+            paused = true;
+          } else if (result.success) {
+            completedNodes.add(result.nodeId);
+            // 更新下游节点的入度
+            for (const dependent of dependents[result.nodeId] || []) {
+              remainingInDegree[dependent] -= 1;
+            }
+          } else {
+            failedNodes.add(result.nodeId);
+            await this.updateRunStatus(runId, WorkflowRunStatus.FAILED, result.nodeId, result.error);
+            await this.releaseLock(run.taskVersionId);
+            return false; // 有节点失败，停止执行
+          }
+        }
+
+        return true; // 继续执行
+      };
+
+      // 主循环：按层级并行执行
+      while (true) {
+        // 检查运行状态
         const currentRun = await this.runRepository.findOne({ where: { id: runId } });
         if (!currentRun || currentRun.status !== WorkflowRunStatus.RUNNING) {
           return;
         }
-        const node = nodes.find((n) => n.id === nodeId);
-        if (!node) continue;
-        const nodeRun = await this.nodeRunRepository.findOne({
-          where: { workflowRunId: runId, nodeId: node.id },
-        });
-        if (!nodeRun) continue;
-        if (nodeRun.status === NodeRunStatus.SUCCEEDED) {
-          continue;
-        }
-        if (nodeRun.status === NodeRunStatus.WAITING_HUMAN || nodeRun.status === NodeRunStatus.PAUSED) {
-          await this.updateRunStatus(runId, WorkflowRunStatus.PAUSED, node.id);
-          return;
+
+        const readyNodes = getReadyNodes();
+        
+        if (readyNodes.length === 0) {
+          // 没有可执行的节点了
+          if (paused) {
+            // 有节点暂停等待人工
+            const pausedNodeId = nodes.find(
+              (n) => !completedNodes.has(n.id) && !failedNodes.has(n.id)
+            )?.id;
+            await this.updateRunStatus(runId, WorkflowRunStatus.PAUSED, pausedNodeId || null);
+            return;
+          }
+          // 全部完成
+          break;
         }
 
-        await this.updateRunStatus(runId, WorkflowRunStatus.RUNNING, node.id);
-        const result = await this.executeNode(run, node, nodeRun, nodes, edges);
-        if (result.status === NodeRunStatus.WAITING_HUMAN || result.status === NodeRunStatus.PAUSED) {
-          await this.updateRunStatus(runId, WorkflowRunStatus.PAUSED, node.id);
-          return;
-        }
-        if (result.status === NodeRunStatus.FAILED) {
-          await this.updateRunStatus(runId, WorkflowRunStatus.FAILED, node.id, result.error);
-          await this.releaseLock(run.taskVersionId);
-          return;
+        console.log(`[executeRun] Executing batch: [${readyNodes.join(', ')}]`);
+        await this.updateRunStatus(runId, WorkflowRunStatus.RUNNING, readyNodes[0]);
+        
+        const shouldContinue = await executeBatch(readyNodes);
+        if (!shouldContinue) {
+          return; // 执行失败，已在 executeBatch 中处理
         }
 
         await this.updateStageIfReady(run, {
@@ -890,6 +1054,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           metadata: templateVersion.metadata,
         });
       }
+
+      // 全部成功完成
       await this.updateRunStatus(runId, WorkflowRunStatus.SUCCEEDED, null);
       await this.updateTaskStage(run.taskId, run.taskVersionId, TaskStage.COMPLETED);
       await this.updateTaskStatus(run.taskId, TaskStatus.COMPLETED);
@@ -923,6 +1089,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
 
       switch (node.type as WorkflowNodeType) {
         case WorkflowNodeType.START: {
+          console.log(`[START] run.input: ${JSON.stringify(run.input)}`);
+          console.log(`[START] inputVariables: ${JSON.stringify(inputVariables)}`);
           nodeRun.output = { variables: this.buildOutputVariables(node, inputVariables) };
           nodeRun.status = NodeRunStatus.SUCCEEDED;
           nodeRun.endedAt = new Date();
@@ -943,13 +1111,18 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             throw new BadRequestException('LLM tool missing prompt template version');
           }
           const renderVariables = this.normalizePromptVariables(inputVariables);
+          console.log(`[LLM_TOOL] inputVariables: ${JSON.stringify(inputVariables)}`);
+          console.log(`[LLM_TOOL] renderVariables: ${JSON.stringify(renderVariables)}`);
           const rendered = await this.promptService.renderPrompt({
             templateVersionId: promptTemplateVersionId,
             variables: renderVariables,
           });
+          console.log(`[LLM_TOOL] rendered prompt: ${JSON.stringify(rendered.rendered).slice(0, 200)}`);
           const providerType = await this.resolveToolProviderType(model, node, tool);
+          console.log(`[LLM_TOOL] providerType: ${providerType}`);
           const nodeName = this.getNodeLabel(node);
           if (providerType === ProviderType.IMAGE || providerType === ProviderType.VIDEO) {
+            console.log(`[LLM_TOOL] Generating media assets...`);
             const inputAssetUrls = await this.collectAssetUrlsFromInputs(inputVariables);
             const inputImages = await this.prepareInputImagesForModel(inputAssetUrls, model);
             const count = toolConfig.outputCount || 1;
@@ -964,6 +1137,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
               inputImages,
               nodeName,
             );
+            console.log(`[LLM_TOOL] Generated ${assets.length} assets`);
             const assetIds = assets.map((asset) => asset.id);
             const assetUrls = assets.map((asset) => asset.url);
             nodeRun.output = {
@@ -974,30 +1148,102 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             };
           } else {
             const outputText = await this.aiService.generateText(rendered.rendered, model);
-            // 保存文本/JSON中间产物
             const outputDef = node.data?.outputs?.[0];
-            const isJsonOutput = outputDef?.type === 'json';
-            let savedAsset: Asset | undefined;
-            if (isJsonOutput) {
+            const outputType = outputDef?.type || 'text';
+            let savedAssets: Asset[] = [];
+            let outputValue: any = outputText;
+
+            // 根据输出类型保存文件
+            if (outputType === 'json') {
               try {
                 const parsed = JSON.parse(outputText);
-                savedAsset = await this.saveJsonAsset(
+                outputValue = parsed;
+                const asset = await this.saveJsonAsset(
                   run,
                   AssetType.STORYBOARD_SCRIPT,
                   `${nodeName}.json`,
                   parsed,
                   nodeName,
                 );
+                savedAssets.push(asset);
               } catch {
                 // 如果解析失败，保存为文本
-                savedAsset = await this.saveTextAsset(run, AssetType.STORYBOARD_SCRIPT, outputText, nodeName);
+                const asset = await this.saveTextAsset(run, AssetType.STORYBOARD_SCRIPT, outputText, nodeName);
+                savedAssets.push(asset);
+              }
+            } else if (outputType === 'list<json>') {
+              try {
+                const parsed = JSON.parse(outputText);
+                const items = Array.isArray(parsed) ? parsed : [parsed];
+                outputValue = items;
+                const asset = await this.saveJsonlAsset(
+                  run,
+                  AssetType.STORYBOARD_SCRIPT,
+                  items,
+                  nodeName,
+                );
+                savedAssets.push(asset);
+              } catch {
+                // 解析失败，保存为文本
+                const asset = await this.saveTextAsset(run, AssetType.STORYBOARD_SCRIPT, outputText, nodeName);
+                savedAssets.push(asset);
+              }
+            } else if (outputType === 'asset_ref') {
+              // 输出是单个 URL，下载并保存
+              if (outputText && typeof outputText === 'string' && outputText.trim()) {
+                const asset = await this.downloadAndSaveAsset(
+                  run,
+                  AssetType.SCENE_IMAGE,
+                  outputText.trim(),
+                  nodeName,
+                );
+                savedAssets.push(asset);
+                outputValue = asset.url;
+              }
+            } else if (outputType === 'list<asset_ref>') {
+              // 输出是 URL 列表
+              try {
+                const parsed = JSON.parse(outputText);
+                const urls = Array.isArray(parsed) ? parsed : [parsed];
+                outputValue = [];
+                for (const url of urls) {
+                  if (url && typeof url === 'string' && url.trim()) {
+                    const asset = await this.downloadAndSaveAsset(
+                      run,
+                      AssetType.SCENE_IMAGE,
+                      url.trim(),
+                      nodeName,
+                    );
+                    savedAssets.push(asset);
+                    outputValue.push(asset.url);
+                  }
+                }
+              } catch {
+                // 解析失败，尝试按行分割
+                const urls = outputText.split('\\n').map((line) => line.trim()).filter(Boolean);
+                outputValue = [];
+                for (const url of urls) {
+                  if (url.startsWith('http')) {
+                    const asset = await this.downloadAndSaveAsset(
+                      run,
+                      AssetType.SCENE_IMAGE,
+                      url,
+                      nodeName,
+                    );
+                    savedAssets.push(asset);
+                    outputValue.push(asset.url);
+                  }
+                }
               }
             } else {
-              savedAsset = await this.saveTextAsset(run, AssetType.STORYBOARD_SCRIPT, outputText, nodeName);
+              // 默认保存为文本
+              const asset = await this.saveTextAsset(run, AssetType.STORYBOARD_SCRIPT, outputText, nodeName);
+              savedAssets.push(asset);
             }
+
             nodeRun.output = {
-              assetIds: savedAsset ? [savedAsset.id] : [],
-              variables: this.buildOutputVariables(node, outputText),
+              assetIds: savedAssets.map((a) => a.id),
+              variables: this.buildOutputVariables(node, outputValue),
               logs: [],
             };
           }
@@ -1481,6 +1727,19 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     return type === 'list<asset_ref>';
   }
 
+  private isVideoValueType(type?: string) {
+    return type === 'video_ref' || type === 'video';
+  }
+
+  private isVideoListType(type?: string) {
+    return type === 'list<video_ref>' || type === 'list<video>';
+  }
+
+  private isMediaType(type?: string) {
+    return this.isImageValueType(type) || this.isImageListType(type) || 
+           this.isVideoValueType(type) || this.isVideoListType(type);
+  }
+
   private resolveToolOutputs(node: any, tool?: any) {
     if (node?.data?.outputs?.length) return node.data.outputs;
     if (tool?.outputs?.length) return tool.outputs;
@@ -1547,71 +1806,89 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
   private hasAssetRefOutputs(node: any) {
     const outputs = node.data?.outputs || [];
     return outputs.some(
-      (output: any) => this.isImageValueType(output.type) || this.isImageListType(output.type),
+      (output: any) => this.isMediaType(output.type),
     );
   }
 
-  private collectTestMediaUrls(outputs: any) {
-    const urls: string[] = [];
-    const pushUrl = (value: any) => {
-      if (typeof value === 'string' && this.isAssetUrl(value)) {
-        urls.push(value);
+  private collectTestMediaUrls(outputs: any): { url: string; mediaType: 'image' | 'video' }[] {
+    const results: { url: string; mediaType: 'image' | 'video' }[] = [];
+    const pushUrl = (value: string, mediaType: 'image' | 'video') => {
+      if (this.isAssetUrl(value)) {
+        results.push({ url: value, mediaType });
       }
     };
-    const pushFromValue = (value: any) => {
+    const pushFromValue = (value: any, mediaType: 'image' | 'video') => {
       if (typeof value === 'string') {
-        pushUrl(value);
+        pushUrl(value, mediaType);
         return;
       }
       if (Array.isArray(value)) {
         value.forEach((item) => {
-          if (typeof item === 'string') pushUrl(item);
+          if (typeof item === 'string') pushUrl(item, mediaType);
         });
       }
     };
     if (outputs && typeof outputs === 'object') {
-      Object.values(outputs).forEach((value) => pushFromValue(value));
+      // 根据 key 判断媒体类型
+      if (outputs.images) {
+        pushFromValue(outputs.images, 'image');
+      }
+      if (outputs.videos) {
+        pushFromValue(outputs.videos, 'video');
+      }
+      // 兼容其他格式
+      Object.entries(outputs).forEach(([key, value]) => {
+        if (key === 'images' || key === 'videos') return; // 已处理
+        const mediaType = key.toLowerCase().includes('video') ? 'video' : 'image';
+        pushFromValue(value, mediaType);
+      });
     }
-    return Array.from(new Set(urls));
+    // 去重
+    const seen = new Set<string>();
+    return results.filter((item) => {
+      if (seen.has(item.url)) return false;
+      seen.add(item.url);
+      return true;
+    });
   }
 
   private async saveTestMediaAssets(
-    urls: string[],
+    mediaItems: { url: string; mediaType: 'image' | 'video' }[],
     user: User,
     spaceId?: number | null,
     templateId?: number,
   ) {
     const folder = this.buildWorkflowTestFolder(user.id, spaceId, templateId);
     const assets: Asset[] = [];
-    for (const url of urls) {
+    for (const { url, mediaType } of mediaItems) {
       const parsed = this.parseDataUri(url);
-      const mediaType = this.inferMediaType(url, parsed?.mimeType);
-      const ext = this.inferExtension(mediaType, parsed?.mimeType, url);
+      // 优先使用传入的 mediaType，其次从 data URI 推断
+      const actualMediaType = parsed?.mimeType?.startsWith('video/') ? 'video' : 
+                              parsed?.mimeType?.startsWith('image/') ? 'image' : mediaType;
+      const ext = this.inferExtension(actualMediaType, parsed?.mimeType, url);
       const filename = `test_${Date.now()}_${Math.random().toString(16).slice(2, 8)}.${ext}`;
-      const mimeType = parsed?.mimeType || this.guessMimeType(mediaType, ext);
+      const mimeType = parsed?.mimeType || this.guessMimeType(actualMediaType, ext);
       let storedUrl: string;
       let filesize: number | undefined;
       
-      try {
-        if (parsed) {
+      // 只有 data URI 才上传到本地存储，远程 URL 直接使用（避免服务器端下载超时）
+      if (parsed) {
+        try {
           storedUrl = await this.storageService.uploadBuffer(parsed.buffer, filename, {
             folder,
             contentType: mimeType,
           });
           filesize = parsed.buffer.length;
-        } else {
-          storedUrl = await this.storageService.uploadRemoteFile(url, filename, {
-            folder,
-            contentType: mimeType,
-          });
+        } catch (e: any) {
+          console.warn(`[saveTestMediaAssets] 上传失败，回退使用 data URI: ${e?.message || e}`);
+          storedUrl = url;
         }
-      } catch (e: any) {
-        // 下载或上传失败时，回退到直接使用原始 URL
-        console.warn(`[saveTestMediaAssets] 存储失败，回退使用原始URL: ${e?.message || e}`);
+      } else {
+        // 远程 URL 直接使用，不尝试下载（服务器端通常无法访问 CDN）
         storedUrl = url;
       }
       
-      const assetType = mediaType === 'video' ? AssetType.LIBRARY_VIDEO : AssetType.LIBRARY_IMAGE;
+      const assetType = actualMediaType === 'video' ? AssetType.LIBRARY_VIDEO : AssetType.LIBRARY_IMAGE;
       const asset = await this.assetRepository.save(
         this.assetRepository.create({
           taskId: null,
@@ -1653,10 +1930,13 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
 
       const type = outputDef.type as string;
       
-      // image/list<image> 类型保存图片资产
-      if (this.isImageValueType(type) || this.isImageListType(type)) {
+      // image/list<image>/video/list<video> 类型保存媒体资产
+      const isImageType = this.isImageValueType(type) || this.isImageListType(type);
+      const isVideoType = this.isVideoValueType(type) || this.isVideoListType(type);
+      if (isImageType || isVideoType) {
         const urls = Array.isArray(value) ? value : [value];
         const resolvedUrls: string[] = [];
+        const mediaType = isVideoType ? 'video' : 'image';
         
         for (const item of urls) {
           if (typeof item === 'number') {
@@ -1667,8 +1947,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
               savedAssetIds.push(asset.id);
             }
           } else if (typeof item === 'string' && this.isAssetUrl(item)) {
-            // 保存 URL 图片
-            const saved = await this.saveOutputImageAsset(run, item, {
+            // 保存 URL 媒体
+            const saved = await this.saveOutputMediaAsset(run, item, mediaType, {
               nodeId: node.id,
               outputKey: outputDef.key,
             }, nodeName);
@@ -1678,7 +1958,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         }
         
         if (resolvedUrls.length) {
-          resolvedOutputs[outputDef.key] = this.isImageListType(type) ? resolvedUrls : resolvedUrls[0];
+          resolvedOutputs[outputDef.key] = (this.isImageListType(type) || this.isVideoListType(type)) ? resolvedUrls : resolvedUrls[0];
         }
       }
       // json 类型保存 JSON 文件
@@ -1713,33 +1993,35 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     return { outputs: resolvedOutputs, assetIds: savedAssetIds };
   }
 
-  private async saveOutputImageAsset(
+  private async saveOutputMediaAsset(
     run: WorkflowRun,
     sourceUrl: string,
+    mediaType: 'image' | 'video',
     metadata: Record<string, any>,
     nodeName?: string,
   ): Promise<Asset> {
     const parsed = this.parseDataUri(sourceUrl);
+    const assetType = mediaType === 'video' ? AssetType.LIBRARY_VIDEO : AssetType.LIBRARY_IMAGE;
+    
     if (parsed) {
-      if (!parsed.mimeType.startsWith('image/')) {
-        throw new BadRequestException('仅支持图片作为输出资产');
-      }
+      // 从 data URI 的 mimeType 推断实际类型
+      const actualMediaType = parsed.mimeType.startsWith('video/') ? 'video' : 'image';
       return await this.saveMediaResult(
         run,
-        AssetType.LIBRARY_IMAGE,
+        actualMediaType === 'video' ? AssetType.LIBRARY_VIDEO : AssetType.LIBRARY_IMAGE,
         { data: parsed.buffer, mimeType: parsed.mimeType },
-        'image',
+        actualMediaType,
         metadata,
         nodeName,
       );
     }
-    const ext = this.inferExtension('image', undefined, sourceUrl);
-    const mimeType = this.guessMimeType('image', ext);
+    const ext = this.inferExtension(mediaType, undefined, sourceUrl);
+    const mimeType = this.guessMimeType(mediaType, ext);
     return await this.saveMediaResult(
       run,
-      AssetType.LIBRARY_IMAGE,
+      assetType,
       { url: sourceUrl, mimeType },
-      'image',
+      mediaType,
       metadata,
       nodeName,
     );
@@ -1898,14 +2180,19 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
   ): Promise<Asset[]> {
     const assets: Asset[] = [];
     for (let i = 0; i < count; i += 1) {
+      console.log(`[generateMediaAssets] Generating ${mediaType} ${i + 1}/${count}...`);
       const media =
         mediaType === 'image'
           ? await this.aiService.generateImage(prompt, modelOverride, inputImages)
           : await this.aiService.generateVideo(prompt, modelOverride, inputImages);
+      console.log(`[generateMediaAssets] AI returned ${media.length} items`);
       if (!media.length) {
         throw new BadRequestException('AI provider returned no media');
       }
+      console.log(`[generateMediaAssets] media[0] format: url=${!!media[0].url}, data=${!!media[0].data}, url_prefix=${media[0].url?.substring(0, 50)}`);
+      console.log(`[generateMediaAssets] Saving media result...`);
       const saved = await this.saveMediaResult(run, type, media[0], mediaType, metadata, nodeName);
+      console.log(`[generateMediaAssets] Saved asset: ${saved.id}, url: ${saved.url?.substring(0, 100)}`);
       assets.push(saved);
     }
     return assets;
@@ -1927,12 +2214,35 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     const folder = this.buildAssetFolder(task.userId, task.id, version.id, type, spaceId);
     const filenamePrefix = nodeName || type;
     const filename = this.buildFilename(filenamePrefix, mediaType === 'image' ? 'png' : 'mp4');
-    let url: string;
+    let url: string = '';
     let mimeType = media.mimeType || (mediaType === 'image' ? 'image/png' : 'video/mp4');
-    if (media.url) {
-      url = await this.storageService.uploadRemoteFile(media.url, filename, { folder, contentType: mimeType });
-    } else if (media.data) {
+    let filesize: number | undefined;
+    
+    if (media.data) {
+      // 已有 buffer 数据，直接上传
+      console.log(`[saveMediaResult] Uploading buffer data, size: ${media.data.length}`);
       url = await this.storageService.uploadBuffer(media.data, filename, { folder, contentType: mimeType });
+      console.log(`[saveMediaResult] Buffer 上传成功: ${url.substring(0, 80)}`);
+      filesize = media.data.length;
+    } else if (media.url) {
+      // 尝试下载远程 URL 到本地存储
+      console.log(`[saveMediaResult] 尝试下载远程 URL: ${media.url.substring(0, 80)}...`);
+      try {
+        const response = await axios.get(media.url, {
+          responseType: 'arraybuffer',
+          timeout: 120000, // 2分钟超时（视频可能较大）
+          maxContentLength: 500 * 1024 * 1024, // 500MB max
+        });
+        const buffer = Buffer.from(response.data);
+        filesize = buffer.length;
+        console.log(`[saveMediaResult] 下载成功，大小: ${filesize} bytes`);
+        url = await this.storageService.uploadBuffer(buffer, filename, { folder, contentType: mimeType });
+        console.log(`[saveMediaResult] 上传到本地存储成功: ${url.substring(0, 80)}`);
+      } catch (downloadError: any) {
+        // 下载失败，回退到使用原始 URL
+        console.warn(`[saveMediaResult] 下载失败 (${downloadError.code || downloadError.message})，使用原始 URL`);
+        url = media.url;
+      }
     } else {
       throw new BadRequestException('No media data available');
     }
@@ -1946,9 +2256,9 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         status: AssetStatus.ACTIVE,
         url,
         filename,
-        filesize: media.data?.length,
+        filesize: filesize ?? media.data?.length,
         mimeType,
-        metadataJson: JSON.stringify({ prompt, nodeName, ...(metadata || {}) }),
+        metadataJson: JSON.stringify({ nodeName, ...(metadata || {}) }),
       }),
     );
   }
@@ -2026,6 +2336,111 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  private async saveJsonlAsset(
+    run: WorkflowRun,
+    type: AssetType,
+    items: any[],
+    nodeName?: string,
+  ): Promise<Asset> {
+    const task = await this.taskRepository.findOne({ where: { id: run.taskId } });
+    const version = await this.taskVersionRepository.findOne({ where: { id: run.taskVersionId } });
+    if (!task || !version) throw new NotFoundException('Task not found');
+
+    const spaceId = await this.getWorkflowSpaceId(run);
+    const folder = this.buildAssetFolder(task.userId, task.id, version.id, type, spaceId);
+    const filename = this.buildFilename(nodeName || type, 'jsonl');
+    const content = items.map((item) => JSON.stringify(item)).join('\\n');
+    const buffer = Buffer.from(content, 'utf-8');
+    const url = await this.storageService.uploadBuffer(buffer, filename, {
+      folder,
+      contentType: 'application/x-ndjson',
+      isPublic: false,
+    });
+
+    return await this.assetRepository.save(
+      this.assetRepository.create({
+        taskId: task.id,
+        versionId: version.id,
+        spaceId,
+        type,
+        status: AssetStatus.ACTIVE,
+        url,
+        filename,
+        filesize: buffer.length,
+        mimeType: 'application/x-ndjson',
+        metadataJson: nodeName ? JSON.stringify({ nodeName }) : undefined,
+      }),
+    );
+  }
+
+  private async downloadAndSaveAsset(
+    run: WorkflowRun,
+    type: AssetType,
+    assetUrl: string,
+    nodeName?: string,
+  ): Promise<Asset> {
+    const task = await this.taskRepository.findOne({ where: { id: run.taskId } });
+    const version = await this.taskVersionRepository.findOne({ where: { id: run.taskVersionId } });
+    if (!task || !version) throw new NotFoundException('Task not found');
+
+    // 下载文件
+    const response = await axios.get<Buffer>(assetUrl, {
+      responseType: 'arraybuffer',
+      timeout: 60000,
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+      httpAgent: new http.Agent(),
+    });
+    const buffer = Buffer.from(response.data);
+    
+    // 从 URL 或 Content-Type 推断文件类型
+    const contentType = response.headers['content-type'] || 'application/octet-stream';
+    let ext = 'bin';
+    let mimeType = contentType;
+    
+    if (contentType.startsWith('image/')) {
+      ext = contentType.split('/')[1]?.split(';')[0] || 'png';
+      if (ext === 'jpeg') ext = 'jpg';
+    } else if (contentType.startsWith('video/')) {
+      ext = contentType.split('/')[1]?.split(';')[0] || 'mp4';
+    } else {
+      // 从 URL 推断
+      const urlExt = assetUrl.split('.').pop()?.split('?')[0]?.toLowerCase();
+      if (urlExt && /^(png|jpg|jpeg|gif|webp|mp4|webm|mov|mkv)$/.test(urlExt)) {
+        ext = urlExt;
+        if (/^(png|jpg|jpeg|gif|webp)$/.test(ext)) {
+          mimeType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+        } else {
+          mimeType = `video/${ext}`;
+        }
+      }
+    }
+
+    const spaceId = await this.getWorkflowSpaceId(run);
+    const folder = this.buildAssetFolder(task.userId, task.id, version.id, type, spaceId);
+    const filename = this.buildFilename(nodeName || type, ext);
+    
+    const url = await this.storageService.uploadBuffer(buffer, filename, {
+      folder,
+      contentType: mimeType,
+      isPublic: true,
+    });
+
+    return await this.assetRepository.save(
+      this.assetRepository.create({
+        taskId: task.id,
+        versionId: version.id,
+        spaceId,
+        type,
+        status: AssetStatus.ACTIVE,
+        url,
+        filename,
+        filesize: buffer.length,
+        mimeType,
+        metadataJson: nodeName ? JSON.stringify({ nodeName, originalUrl: assetUrl }) : undefined,
+      }),
+    );
+  }
+
   private async saveMockFinal(run: WorkflowRun): Promise<Asset> {
     const payload = { status: 'final_compose', timestamp: new Date().toISOString() };
     return await this.saveJsonAsset(run, AssetType.FINAL_VIDEO, 'final.json', payload);
@@ -2064,7 +2479,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
   }
 
   private buildFilename(prefix: string, ext: string): string {
-    // 清理前缀，移除不安全字符
+    // 清理前缀，移除不安全字符，保留中文、字母、数字、下划线和连字符
     const safePrefix = prefix.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, '_').slice(0, 50);
     return `${safePrefix}_${Date.now()}.${ext}`;
   }

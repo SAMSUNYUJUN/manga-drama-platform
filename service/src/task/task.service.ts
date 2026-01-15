@@ -6,10 +6,16 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Task, TaskVersion, User } from '../database/entities';
+import { Task, TaskVersion, User, WorkflowRun } from '../database/entities';
 import { CreateTaskDto, UpdateTaskDto, QueryTaskDto } from './dto';
-import { TaskStatus, TaskStage, UserRole } from '@shared/constants';
+import { TaskStatus, TaskStage, UserRole, WorkflowRunStatus } from '@shared/constants';
 import { PaginatedResponse, TaskDetail } from '@shared/types';
+
+export interface TaskStats {
+  total: number;
+  processing: number;
+  completed: number;
+}
 
 @Injectable()
 export class TaskService {
@@ -18,6 +24,8 @@ export class TaskService {
     private taskRepository: Repository<Task>,
     @InjectRepository(TaskVersion)
     private versionRepository: Repository<TaskVersion>,
+    @InjectRepository(WorkflowRun)
+    private workflowRunRepository: Repository<WorkflowRun>,
   ) {}
 
   /**
@@ -142,5 +150,43 @@ export class TaskService {
     }
 
     await this.taskRepository.remove(task);
+  }
+
+  /**
+   * 获取任务统计
+   */
+  async getStats(user: User): Promise<TaskStats> {
+    // 获取用户的所有任务
+    const query = this.taskRepository
+      .createQueryBuilder('task')
+      .where(user.role === UserRole.ADMIN ? '1=1' : 'task.userId = :userId', {
+        userId: user.id,
+      });
+
+    const tasks = await query.getMany();
+    const total = tasks.length;
+
+    // 获取这些任务的最新工作流运行状态
+    let processing = 0;
+    let completed = 0;
+
+    for (const task of tasks) {
+      if (task.currentVersionId) {
+        const run = await this.workflowRunRepository.findOne({
+          where: { taskVersionId: task.currentVersionId },
+          order: { createdAt: 'DESC' },
+        });
+
+        if (run) {
+          if (run.status === WorkflowRunStatus.RUNNING || run.status === WorkflowRunStatus.PENDING) {
+            processing++;
+          } else if (run.status === WorkflowRunStatus.SUCCEEDED) {
+            completed++;
+          }
+        }
+      }
+    }
+
+    return { total, processing, completed };
   }
 }

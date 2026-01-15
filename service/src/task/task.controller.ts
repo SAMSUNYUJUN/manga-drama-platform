@@ -15,7 +15,7 @@ import {
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
-import { TaskService } from './task.service';
+import { TaskService, TaskStats } from './task.service';
 import { TaskVersionService } from './task-version.service';
 import { CreateTaskDto, UpdateTaskDto, QueryTaskDto, CreateTaskVersionDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards';
@@ -30,6 +30,20 @@ export class TaskController {
     private readonly taskService: TaskService,
     private readonly taskVersionService: TaskVersionService,
   ) {}
+
+  /**
+   * 获取任务统计
+   * GET /api/tasks/stats
+   */
+  @Get('stats')
+  async getStats(@CurrentUser() user: User): Promise<ApiResponse<TaskStats>> {
+    const data = await this.taskService.getStats(user);
+    return {
+      success: true,
+      data,
+      message: 'Task stats retrieved successfully',
+    };
+  }
 
   /**
    * 创建任务

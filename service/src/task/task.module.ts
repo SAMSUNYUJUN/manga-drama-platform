@@ -5,13 +5,13 @@
 
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Task, TaskVersion } from '../database/entities';
+import { Task, TaskVersion, WorkflowRun } from '../database/entities';
 import { TaskService } from './task.service';
 import { TaskVersionService } from './task-version.service';
 import { TaskController } from './task.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Task, TaskVersion])],
+  imports: [TypeOrmModule.forFeature([Task, TaskVersion, WorkflowRun])],
   controllers: [TaskController],
   providers: [TaskService, TaskVersionService],
   exports: [TaskService, TaskVersionService],

@@ -73,3 +73,17 @@ export const updateTask = async (id: number, data: UpdateTaskDto): Promise<Task>
 export const deleteTask = async (id: number): Promise<void> => {
   await api.delete(`/tasks/${id}`);
 };
+
+/**
+ * 获取任务统计
+ */
+export interface TaskStats {
+  total: number;
+  processing: number;
+  completed: number;
+}
+
+export const getTaskStats = async (): Promise<TaskStats> => {
+  const response = await api.get<ApiResponse<TaskStats>>('/tasks/stats');
+  return response.data.data!;
+};
