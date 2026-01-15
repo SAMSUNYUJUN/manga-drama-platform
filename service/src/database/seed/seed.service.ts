@@ -52,7 +52,6 @@ export class SeedService implements OnModuleInit {
     await this.seedAdminUser();
     await this.seedProviders();
     await this.seedWorkflow();
-    await this.seedSampleTask();
   }
 
   private async seedAdminUser() {
@@ -168,33 +167,5 @@ export class SeedService implements OnModuleInit {
       this.logger.log('Removed default workflow template');
       return;
     }
-  }
-
-  private async seedSampleTask() {
-    const admin = await this.userRepository.findOne({ where: { role: UserRole.ADMIN } });
-    if (!admin) return;
-    const existing = await this.taskRepository.findOne({ where: { title: 'Sample Task' } });
-    if (existing) return;
-
-    const task = await this.taskRepository.save(
-      this.taskRepository.create({
-        userId: admin.id,
-        title: 'Sample Task',
-        description: 'Seeded task for demo',
-        status: TaskStatus.PENDING,
-        stage: TaskStage.SCRIPT_UPLOADED,
-      }),
-    );
-
-    const version = await this.taskVersionRepository.save(
-      this.taskVersionRepository.create({
-        taskId: task.id,
-        version: 1,
-        stage: TaskStage.SCRIPT_UPLOADED,
-      }),
-    );
-    task.currentVersionId = version.id;
-    await this.taskRepository.save(task);
-    this.logger.log('Seeded sample task');
   }
 }

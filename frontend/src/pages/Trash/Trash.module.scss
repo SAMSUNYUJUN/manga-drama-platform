@@ -8,6 +8,35 @@
   font-size: 24px;
 }
 
+.batchActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-md);
+  background: var(--color-bg-elevated);
+  border-radius: var(--border-radius-lg);
+  border: 1px solid var(--border-color);
+}
+
+.selectAll {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  cursor: pointer;
+  user-select: none;
+  
+  input {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+  }
+}
+
+.batchButtons {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
 .list {
   display: flex;
   flex-direction: column;
@@ -16,12 +45,24 @@
 
 .item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: var(--spacing-md);
   padding: var(--spacing-md);
   border-radius: var(--border-radius-lg);
   background: var(--color-bg-elevated);
   border: 1px solid var(--border-color);
+}
+
+.checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.info {
+  flex: 1;
+  min-width: 0;
 }
 
 .title {
@@ -36,4 +77,11 @@
 .actions {
   display: flex;
   gap: var(--spacing-sm);
+  flex-shrink: 0;
+}
+
+.empty {
+  text-align: center;
+  color: var(--color-text-secondary);
+  padding: var(--spacing-xl);
 }

@@ -39,3 +39,11 @@ export const downloadAsset = async (id: number): Promise<{ url: string }> => {
 export const hardDeleteAsset = async (id: number, confirmToken: string): Promise<void> => {
   await api.delete(`/assets/${id}`, { params: { confirmToken } });
 };
+
+export const batchHardDeleteAssets = async (ids: number[], confirmToken: string): Promise<void> => {
+  await api.post('/assets/batch-delete', { ids, confirmToken });
+};
+
+export const batchRestoreAssets = async (ids: number[]): Promise<void> => {
+  await api.post('/assets/batch-restore', { ids });
+};

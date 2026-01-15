@@ -35,7 +35,7 @@ export class ScriptService {
   ): Promise<Asset> {
     const { task, version } = await this.ensureTaskAccess(taskId, versionId, user);
 
-    const folder = this.buildAssetFolder(task.userId, taskId, versionId, AssetType.ORIGINAL_SCRIPT);
+    const folder = this.buildAssetFolder(task.userId, taskId, versionId, AssetType.TASK_EXECUTION);
     const filename = this.buildFilename('script', file.originalname);
     const url = await this.storageService.uploadBuffer(file.buffer, filename, {
       folder,
@@ -46,7 +46,7 @@ export class ScriptService {
     const asset = this.assetRepository.create({
       taskId,
       versionId,
-      type: AssetType.ORIGINAL_SCRIPT,
+      type: AssetType.TASK_EXECUTION,
       status: AssetStatus.ACTIVE,
       url,
       filename: file.originalname,
@@ -77,7 +77,7 @@ export class ScriptService {
         });
       } else {
         scriptAsset = await this.assetRepository.findOne({
-          where: { taskId, versionId, type: AssetType.ORIGINAL_SCRIPT, status: AssetStatus.ACTIVE },
+          where: { taskId, versionId, type: AssetType.TASK_EXECUTION, status: AssetStatus.ACTIVE },
           order: { createdAt: 'DESC' },
         });
       }
@@ -88,7 +88,7 @@ export class ScriptService {
     }
 
     const result = await this.aiService.parseScript(scriptText, body.config);
-    const folder = this.buildAssetFolder(task.userId, taskId, versionId, AssetType.STORYBOARD_SCRIPT);
+    const folder = this.buildAssetFolder(task.userId, taskId, versionId, AssetType.TASK_EXECUTION);
     const filename = this.buildFilename('storyboard', 'storyboard.json');
     const jsonBuffer = Buffer.from(JSON.stringify(result, null, 2));
     const url = await this.storageService.uploadBuffer(jsonBuffer, filename, {
@@ -100,7 +100,7 @@ export class ScriptService {
     const asset = this.assetRepository.create({
       taskId,
       versionId,
-      type: AssetType.STORYBOARD_SCRIPT,
+      type: AssetType.TASK_EXECUTION,
       status: AssetStatus.ACTIVE,
       url,
       filename,
@@ -118,8 +118,8 @@ export class ScriptService {
     await this.ensureTaskAccess(taskId, versionId, user);
     return await this.assetRepository.find({
       where: [
-        { taskId, versionId, type: AssetType.ORIGINAL_SCRIPT },
-        { taskId, versionId, type: AssetType.STORYBOARD_SCRIPT },
+        { taskId, versionId, type: AssetType.TASK_EXECUTION },
+        { taskId, versionId, type: AssetType.TASK_EXECUTION },
       ],
       order: { createdAt: 'DESC' },
     });

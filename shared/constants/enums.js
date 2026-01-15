@@ -30,12 +30,7 @@ var TaskStage;
 })(TaskStage || (exports.TaskStage = TaskStage = {}));
 var AssetType;
 (function (AssetType) {
-    AssetType["ORIGINAL_SCRIPT"] = "original_script";
-    AssetType["STORYBOARD_SCRIPT"] = "storyboard_script";
-    AssetType["CHARACTER_DESIGN"] = "character_design";
-    AssetType["SCENE_IMAGE"] = "scene_image";
-    AssetType["KEYFRAME_IMAGE"] = "keyframe_image";
-    AssetType["STORYBOARD_VIDEO"] = "storyboard_video";
-    AssetType["FINAL_VIDEO"] = "final_video";
+    AssetType["WORKFLOW_TEST"] = "workflow_test";
+    AssetType["TASK_EXECUTION"] = "task_execution";
 })(AssetType || (exports.AssetType = AssetType = {}));
 //# sourceMappingURL=enums.js.map

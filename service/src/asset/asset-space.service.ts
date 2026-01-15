@@ -109,12 +109,12 @@ export class AssetSpaceService {
 
   private resolveAssetType(mimeType: string): AssetType {
     if (mimeType?.startsWith('image/')) {
-      return AssetType.LIBRARY_IMAGE;
+      return AssetType.TASK_EXECUTION;
     }
     if (mimeType?.startsWith('video/')) {
-      return AssetType.LIBRARY_VIDEO;
+      return AssetType.TASK_EXECUTION;
     }
-    return AssetType.LIBRARY_FILE;
+    return AssetType.TASK_EXECUTION;
   }
 
   private buildAssetFolder(userId: number, spaceId: number, type: AssetType): string {

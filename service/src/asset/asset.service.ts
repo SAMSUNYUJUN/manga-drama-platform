@@ -201,4 +201,47 @@ export class AssetService {
     asset.replacedById = newAssetId;
     await this.assetRepository.save(asset);
   }
+
+  /**
+   * 批量永久删除资产
+   */
+  async batchHardDelete(ids: number[], confirmToken: string | undefined, user: User): Promise<number> {
+    if (user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Only admins can hard delete assets');
+    }
+
+    const requiredToken = this.configService.get<string>('ASSET_HARD_DELETE_TOKEN', 'HARD_DELETE');
+    if (!confirmToken || confirmToken !== requiredToken) {
+      throw new BadRequestException('Invalid hard delete confirmation token');
+    }
+
+    let deleted = 0;
+    for (const id of ids) {
+      const asset = await this.assetRepository.findOne({ where: { id } });
+      if (asset) {
+        await this.storageService.delete(asset.url);
+        await this.assetRepository.remove(asset);
+        await this.trashService.removeTrashRecordByAssetId(id);
+        deleted++;
+      }
+    }
+    return deleted;
+  }
+
+  /**
+   * 批量恢复资产
+   */
+  async batchRestore(ids: number[], user: User): Promise<number> {
+    let restored = 0;
+    for (const id of ids) {
+      const asset = await this.assetRepository.findOne({ where: { id } });
+      if (asset && asset.status === AssetStatus.TRASHED) {
+        asset.status = AssetStatus.ACTIVE;
+        await this.assetRepository.save(asset);
+        await this.trashService.removeTrashRecordByAssetId(id);
+        restored++;
+      }
+    }
+    return restored;
+  }
 }

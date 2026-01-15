@@ -7,8 +7,13 @@ import { useEffect, useState } from 'react';
 import { assetService, assetSpaceService } from '../../services';
 import type { Asset } from '@shared/types/asset.types';
 import type { AssetSpace } from '@shared/types/asset-space.types';
-import { AssetStatus } from '@shared/constants';
+import { AssetStatus, AssetType } from '@shared/constants';
 import styles from './Assets.module.scss';
+
+const ASSET_TYPE_LABELS: Record<string, string> = {
+  [AssetType.WORKFLOW_TEST]: '工作流测试',
+  [AssetType.TASK_EXECUTION]: '任务执行',
+};
 
 export const Assets = () => {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -196,7 +201,7 @@ export const Assets = () => {
               <div key={asset.id} className={styles.item}>
                 <div>
                   <div className={styles.title}>{asset.filename}</div>
-                  <div className={styles.meta}>{asset.type}</div>
+                  <div className={styles.meta}>{ASSET_TYPE_LABELS[asset.type] || asset.type}</div>
                 </div>
                 <div className={styles.actions}>
                   <button

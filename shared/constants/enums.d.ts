@@ -23,11 +23,6 @@ export declare enum TaskStage {
     COMPLETED = "COMPLETED"
 }
 export declare enum AssetType {
-    ORIGINAL_SCRIPT = "original_script",
-    STORYBOARD_SCRIPT = "storyboard_script",
-    CHARACTER_DESIGN = "character_design",
-    SCENE_IMAGE = "scene_image",
-    KEYFRAME_IMAGE = "keyframe_image",
-    STORYBOARD_VIDEO = "storyboard_video",
-    FINAL_VIDEO = "final_video"
+    WORKFLOW_TEST = "workflow_test",
+    TASK_EXECUTION = "task_execution"
 }

@@ -10,6 +10,7 @@ import {
   Post,
   Param,
   Query,
+  Body,
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
@@ -125,6 +126,40 @@ export class AssetController {
       success: true,
       data,
       message: 'Asset restored successfully',
+    };
+  }
+
+  /**
+   * 批量永久删除资产
+   * POST /api/assets/batch-delete
+   */
+  @Post('batch-delete')
+  async batchDelete(
+    @Body() body: { ids: number[]; confirmToken: string },
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<{ deleted: number }>> {
+    const deleted = await this.assetService.batchHardDelete(body.ids, body.confirmToken, user);
+    return {
+      success: true,
+      data: { deleted },
+      message: `${deleted} assets hard deleted successfully`,
+    };
+  }
+
+  /**
+   * 批量恢复资产
+   * POST /api/assets/batch-restore
+   */
+  @Post('batch-restore')
+  async batchRestore(
+    @Body() body: { ids: number[] },
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<{ restored: number }>> {
+    const restored = await this.assetService.batchRestore(body.ids, user);
+    return {
+      success: true,
+      data: { restored },
+      message: `${restored} assets restored successfully`,
     };
   }
 }

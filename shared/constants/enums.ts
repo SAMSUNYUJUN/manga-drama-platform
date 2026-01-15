@@ -43,16 +43,8 @@ export enum TaskStage {
  * 资产类型枚举
  */
 export enum AssetType {
-  ORIGINAL_SCRIPT = 'original_script',
-  STORYBOARD_SCRIPT = 'storyboard_script',
-  CHARACTER_DESIGN = 'character_design',
-  SCENE_IMAGE = 'scene_image',
-  KEYFRAME_IMAGE = 'keyframe_image',
-  STORYBOARD_VIDEO = 'storyboard_video',
-  FINAL_VIDEO = 'final_video',
-  LIBRARY_IMAGE = 'library_image',
-  LIBRARY_VIDEO = 'library_video',
-  LIBRARY_FILE = 'library_file',
+  WORKFLOW_TEST = 'workflow_test',
+  TASK_EXECUTION = 'task_execution',
 }
 
 /**

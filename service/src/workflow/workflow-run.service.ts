@@ -327,7 +327,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     }
     const { task, version } = await this.ensureTaskAccess(run.taskId, run.taskVersionId, user);
 
-    const assetType = (dto.assetType as AssetType) || AssetType.CHARACTER_DESIGN;
+    const assetType = (dto.assetType as AssetType) || AssetType.TASK_EXECUTION;
     const spaceId = await this.getWorkflowSpaceId(run);
     const folder = this.buildAssetFolder(task.userId, task.id, version.id, assetType, spaceId);
     const filename = this.buildFilename('review', file.originalname);
@@ -1128,7 +1128,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             const count = toolConfig.outputCount || 1;
             const assets = await this.generateMediaAssets(
               run,
-              providerType === ProviderType.IMAGE ? AssetType.SCENE_IMAGE : AssetType.STORYBOARD_VIDEO,
+              providerType === ProviderType.IMAGE ? AssetType.TASK_EXECUTION : AssetType.TASK_EXECUTION,
               rendered.rendered,
               count,
               providerType === ProviderType.IMAGE ? 'image' : 'video',
@@ -1160,7 +1160,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
                 outputValue = parsed;
                 const asset = await this.saveJsonAsset(
                   run,
-                  AssetType.STORYBOARD_SCRIPT,
+                  AssetType.TASK_EXECUTION,
                   `${nodeName}.json`,
                   parsed,
                   nodeName,
@@ -1168,7 +1168,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
                 savedAssets.push(asset);
               } catch {
                 // 如果解析失败，保存为文本
-                const asset = await this.saveTextAsset(run, AssetType.STORYBOARD_SCRIPT, outputText, nodeName);
+                const asset = await this.saveTextAsset(run, AssetType.TASK_EXECUTION, outputText, nodeName);
                 savedAssets.push(asset);
               }
             } else if (outputType === 'list<json>') {
@@ -1178,14 +1178,14 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
                 outputValue = items;
                 const asset = await this.saveJsonlAsset(
                   run,
-                  AssetType.STORYBOARD_SCRIPT,
+                  AssetType.TASK_EXECUTION,
                   items,
                   nodeName,
                 );
                 savedAssets.push(asset);
               } catch {
                 // 解析失败，保存为文本
-                const asset = await this.saveTextAsset(run, AssetType.STORYBOARD_SCRIPT, outputText, nodeName);
+                const asset = await this.saveTextAsset(run, AssetType.TASK_EXECUTION, outputText, nodeName);
                 savedAssets.push(asset);
               }
             } else if (outputType === 'asset_ref') {
@@ -1193,7 +1193,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
               if (outputText && typeof outputText === 'string' && outputText.trim()) {
                 const asset = await this.downloadAndSaveAsset(
                   run,
-                  AssetType.SCENE_IMAGE,
+                  AssetType.TASK_EXECUTION,
                   outputText.trim(),
                   nodeName,
                 );
@@ -1210,7 +1210,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
                   if (url && typeof url === 'string' && url.trim()) {
                     const asset = await this.downloadAndSaveAsset(
                       run,
-                      AssetType.SCENE_IMAGE,
+                      AssetType.TASK_EXECUTION,
                       url.trim(),
                       nodeName,
                     );
@@ -1226,7 +1226,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
                   if (url.startsWith('http')) {
                     const asset = await this.downloadAndSaveAsset(
                       run,
-                      AssetType.SCENE_IMAGE,
+                      AssetType.TASK_EXECUTION,
                       url,
                       nodeName,
                     );
@@ -1237,7 +1237,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
               }
             } else {
               // 默认保存为文本
-              const asset = await this.saveTextAsset(run, AssetType.STORYBOARD_SCRIPT, outputText, nodeName);
+              const asset = await this.saveTextAsset(run, AssetType.TASK_EXECUTION, outputText, nodeName);
               savedAssets.push(asset);
             }
 
@@ -1261,7 +1261,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           const parsed = await this.aiService.parseScript(scriptText, config);
           const asset = await this.saveJsonAsset(
             run,
-            AssetType.STORYBOARD_SCRIPT,
+            AssetType.TASK_EXECUTION,
             'storyboard.json',
             parsed,
           );
@@ -1295,7 +1295,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           const nodeName = this.getNodeLabel(node);
           const assets = await this.generateMediaAssets(
             run,
-            AssetType.CHARACTER_DESIGN,
+            AssetType.TASK_EXECUTION,
             prompt,
             count,
             'image',
@@ -1357,7 +1357,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           const nodeName = this.getNodeLabel(node);
           const assets = await this.generateMediaAssets(
             run,
-            AssetType.SCENE_IMAGE,
+            AssetType.TASK_EXECUTION,
             prompt,
             1,
             'image',
@@ -1386,7 +1386,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           const nodeName = this.getNodeLabel(node);
           const assets = await this.generateMediaAssets(
             run,
-            AssetType.KEYFRAME_IMAGE,
+            AssetType.TASK_EXECUTION,
             prompt,
             1,
             'image',
@@ -1419,7 +1419,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           const nodeName = this.getNodeLabel(node);
           const assets = await this.generateMediaAssets(
             run,
-            AssetType.STORYBOARD_VIDEO,
+            AssetType.TASK_EXECUTION,
             prompt,
             1,
             'video',
@@ -1888,13 +1888,12 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         storedUrl = url;
       }
       
-      const assetType = actualMediaType === 'video' ? AssetType.LIBRARY_VIDEO : AssetType.LIBRARY_IMAGE;
       const asset = await this.assetRepository.save(
         this.assetRepository.create({
           taskId: null,
           versionId: null,
           spaceId: spaceId ?? null,
-          type: assetType,
+          type: AssetType.WORKFLOW_TEST,
           status: AssetStatus.ACTIVE,
           url: storedUrl,
           filename,
@@ -1936,7 +1935,6 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       if (isImageType || isVideoType) {
         const urls = Array.isArray(value) ? value : [value];
         const resolvedUrls: string[] = [];
-        const mediaType = isVideoType ? 'video' : 'image';
         
         for (const item of urls) {
           if (typeof item === 'number') {
@@ -1947,13 +1945,26 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
               savedAssetIds.push(asset.id);
             }
           } else if (typeof item === 'string' && this.isAssetUrl(item)) {
-            // 保存 URL 媒体
-            const saved = await this.saveOutputMediaAsset(run, item, mediaType, {
-              nodeId: node.id,
-              outputKey: outputDef.key,
-            }, nodeName);
-            resolvedUrls.push(saved.url);
-            savedAssetIds.push(saved.id);
+            // 检查是否已经是本地存储的资产（避免重复保存）
+            const existingAsset = await this.assetRepository.findOne({ 
+              where: { url: item, status: AssetStatus.ACTIVE } 
+            });
+            if (existingAsset) {
+              // 已存在的资产，直接引用
+              resolvedUrls.push(existingAsset.url);
+              savedAssetIds.push(existingAsset.id);
+            } else {
+              // 新资产，需要保存
+              // 根据 URL 内容智能检测媒体类型
+              const parsed = this.parseDataUri(item);
+              const detectedMediaType = this.inferMediaType(item, parsed?.mimeType);
+              const saved = await this.saveOutputMediaAsset(run, item, detectedMediaType, {
+                nodeId: node.id,
+                outputKey: outputDef.key,
+              }, nodeName);
+              resolvedUrls.push(saved.url);
+              savedAssetIds.push(saved.id);
+            }
           }
         }
         
@@ -1966,7 +1977,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         const jsonContent = typeof value === 'string' ? value : JSON.stringify(value);
         const asset = await this.saveJsonAsset(
           run,
-          AssetType.STORYBOARD_SCRIPT,
+          AssetType.TASK_EXECUTION,
           `${nodeName}_${outputDef.key}.json`,
           typeof value === 'string' ? JSON.parse(value) : value,
           `${nodeName}_${outputDef.key}`,
@@ -1980,7 +1991,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         const textContent = typeof value === 'string' ? value : JSON.stringify(value);
         const asset = await this.saveTextAsset(
           run,
-          AssetType.STORYBOARD_SCRIPT,
+          AssetType.TASK_EXECUTION,
           textContent,
           `${nodeName}_${outputDef.key}`,
         );
@@ -2001,14 +2012,14 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     nodeName?: string,
   ): Promise<Asset> {
     const parsed = this.parseDataUri(sourceUrl);
-    const assetType = mediaType === 'video' ? AssetType.LIBRARY_VIDEO : AssetType.LIBRARY_IMAGE;
+    const assetType = mediaType === 'video' ? AssetType.TASK_EXECUTION : AssetType.TASK_EXECUTION;
     
     if (parsed) {
       // 从 data URI 的 mimeType 推断实际类型
       const actualMediaType = parsed.mimeType.startsWith('video/') ? 'video' : 'image';
       return await this.saveMediaResult(
         run,
-        actualMediaType === 'video' ? AssetType.LIBRARY_VIDEO : AssetType.LIBRARY_IMAGE,
+        actualMediaType === 'video' ? AssetType.TASK_EXECUTION : AssetType.TASK_EXECUTION,
         { data: parsed.buffer, mimeType: parsed.mimeType },
         actualMediaType,
         metadata,
@@ -2047,7 +2058,11 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
   private inferMediaType(url: string, mimeType?: string): 'image' | 'video' {
     if (mimeType?.startsWith('video/')) return 'video';
     if (mimeType?.startsWith('image/')) return 'image';
-    if (/\.mp4$|\.webm$|\.mov$|\.mkv$/i.test(url)) return 'video';
+    // 检查 URL 扩展名
+    if (/\.mp4|\.webm|\.mov|\.mkv|\.avi|\.m4v/i.test(url)) return 'video';
+    if (/\.png|\.jpg|\.jpeg|\.gif|\.webp|\.bmp/i.test(url)) return 'image';
+    // 检查 URL 中是否包含视频相关的关键词（用于无扩展名的 CDN URL）
+    if (/video|\.mp4|mp4|mov|webm/i.test(url)) return 'video';
     return 'image';
   }
 
@@ -2443,7 +2458,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
 
   private async saveMockFinal(run: WorkflowRun): Promise<Asset> {
     const payload = { status: 'final_compose', timestamp: new Date().toISOString() };
-    return await this.saveJsonAsset(run, AssetType.FINAL_VIDEO, 'final.json', payload);
+    return await this.saveJsonAsset(run, AssetType.TASK_EXECUTION, 'final.json', payload);
   }
 
   private async getWorkflowSpaceId(run: WorkflowRun): Promise<number | null> {
@@ -2497,7 +2512,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     const scriptAsset = await this.getLatestAsset(
       run.taskId,
       run.taskVersionId,
-      AssetType.ORIGINAL_SCRIPT,
+      AssetType.TASK_EXECUTION,
     );
     if (!scriptAsset) {
       throw new NotFoundException('No script asset found');

@@ -150,8 +150,9 @@ export const TaskList = () => {
       try {
         const versions = await workflowService.listWorkflowTemplateVersions(selectedTemplateId);
         setTemplateVersions(versions);
-        if (versions.length > 0) {
-          const latestVersion = versions[versions.length - 1];
+        // 如果不是恢复历史配置，则默认选择最新版本（versions 按 version DESC 排序，最新版在第一个）
+        if (versions.length > 0 && !restoringConfig) {
+          const latestVersion = versions[0];
           setSelectedVersionId(latestVersion.id);
         }
       } catch (err) {
@@ -539,7 +540,7 @@ export const TaskList = () => {
                     <option value="">-- 选择版本 --</option>
                     {templateVersions.map((v) => (
                       <option key={v.id} value={v.id}>
-                        版本 #{v.id}
+                        版本 {v.version}
                       </option>
                     ))}
                   </select>
