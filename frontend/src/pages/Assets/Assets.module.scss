@@ -131,6 +131,18 @@
   font-size: 12px;
 }
 
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.pageInfo {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 @media (max-width: 960px) {
   .layout {
     grid-template-columns: 1fr;

@@ -15,6 +15,9 @@ export const Sidebar = () => {
         <NavLink to="/dashboard" className={({ isActive }) => isActive ? styles.active : ''}>
           📊 仪表板
         </NavLink>
+        <NavLink to="/workbench" className={({ isActive }) => isActive ? styles.active : ''}>
+          🎬 漫剧工作台
+        </NavLink>
         <NavLink to="/tasks" className={({ isActive }) => isActive ? styles.active : ''}>
           📋 任务列表
         </NavLink>

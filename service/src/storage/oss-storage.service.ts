@@ -128,4 +128,24 @@ export class OssStorageService implements IStorageService {
     if (path.startsWith('http')) return path;
     return `https://${this.bucket}.${this.region}.aliyuncs.com/${path}`;
   }
+
+  async getTextContent(urlOrPath: string): Promise<string> {
+    try {
+      const client = this.initOSSClient();
+      // 从 URL 中提取 OSS key
+      let ossKey: string;
+      if (urlOrPath.startsWith('http')) {
+        ossKey = urlOrPath.replace(/https?:\/\/[^\/]+\//, '');
+      } else {
+        ossKey = urlOrPath;
+      }
+      
+      const result = await client.get(ossKey);
+      // result.content 是 Buffer
+      return result.content.toString('utf-8');
+    } catch (error) {
+      this.logger.error(`OSS 读取文件内容失败: ${error.message}`);
+      throw new Error(`Failed to read file content from OSS: ${error.message}`);
+    }
+  }
 }

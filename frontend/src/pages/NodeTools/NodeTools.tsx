@@ -4,12 +4,19 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { nodeToolService, promptService, adminService } from '../../services';
-import type { NodeTool, NodeToolTestResult } from '@shared/types/node-tool.types';
+import { nodeToolService, promptService, adminService, assetSpaceService } from '../../services';
+import type {
+  NodeTool,
+  NodeToolTestResult,
+  ModelSpecificConfig,
+  DoubaoSeedreamConfig,
+  SoraVideoConfig,
+} from '@shared/types/node-tool.types';
 import { IMAGE_ASPECT_RATIOS } from '@shared/types/node-tool.types';
 import type { PromptTemplateVersion } from '@shared/types/prompt.types';
 import type { ProviderConfig } from '@shared/types/provider.types';
 import type { WorkflowValueType, WorkflowVariable } from '@shared/types/workflow.types';
+import type { AssetSpace } from '@shared/types/asset-space.types';
 import { ProviderType } from '@shared/constants';
 import styles from './NodeTools.module.scss';
 
@@ -19,11 +26,13 @@ const VARIABLE_TYPES: WorkflowValueType[] = [
   'boolean',
   'json',
   'asset_ref',
+  'asset_file',
   'list<text>',
   'list<number>',
   'list<boolean>',
   'list<json>',
   'list<asset_ref>',
+  'list<asset_file>',
 ];
 
 const MAX_NANO_BANANA_IMAGES = 3;
@@ -41,8 +50,8 @@ const isVideoUrl = (value?: string) => {
 };
 
 // 辅助函数：判断是否为资产引用类型（图片/视频URL）
-const isAssetRefType = (type?: string) => type === 'asset_ref';
-const isAssetRefListType = (type?: string) => type === 'list<asset_ref>';
+const isAssetRefType = (type?: string) => type === 'asset_ref' || type === 'asset_file';
+const isAssetRefListType = (type?: string) => type === 'list<asset_ref>' || type === 'list<asset_file>';
 const isAnyAssetRefType = (type?: string) => isAssetRefType(type) || isAssetRefListType(type);
 
 type ToolForm = {
@@ -50,8 +59,16 @@ type ToolForm = {
   name: string;
   description: string;
   promptTemplateVersionId?: number;
+  /** System prompt version ID (for LLM nodes) */
+  systemPromptVersionId?: number;
   model?: string;
   imageAspectRatio?: string;
+  /** LLM max tokens (default: 1000) */
+  maxTokens?: number;
+  /** LLM temperature (default: 0.7) */
+  temperature?: number;
+  /** 模型特定配置 */
+  modelConfig?: ModelSpecificConfig;
   enabled: boolean;
   inputs: WorkflowVariable[];
   outputs: WorkflowVariable[];
@@ -59,12 +76,29 @@ type ToolForm = {
 
 type PromptVersionOption = PromptTemplateVersion & { templateName: string };
 
+/** 判断是否是 doubao-seedream 模型 */
+const isDoubaoSeedreamModel = (model?: string) => {
+  if (!model) return false;
+  const key = model.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return key.includes('doubaoseedream') || key.includes('seedream');
+};
+
+const isSoraModel = (model?: string) => {
+  if (!model) return false;
+  const key = model.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return key === 'sora2' || key === 'sora2pro';
+};
+
 const emptyForm: ToolForm = {
   name: '',
   description: '',
   promptTemplateVersionId: undefined,
+  systemPromptVersionId: undefined,
   model: undefined,
-  imageAspectRatio: '16:9',
+  imageAspectRatio: undefined,
+  maxTokens: 8000,
+  temperature: 0.7,
+  modelConfig: undefined,
   enabled: true,
   inputs: [],
   outputs: [],
@@ -80,6 +114,8 @@ export const NodeTools = () => {
   const [testFiles, setTestFiles] = useState<Record<string, File[]>>({});
   const [testResult, setTestResult] = useState<NodeToolTestResult | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [assetSpaces, setAssetSpaces] = useState<AssetSpace[]>([]);
+  const [selectedTestSpaceId, setSelectedTestSpaceId] = useState<number | ''>('');
 
   const modelOptions = useMemo(() => {
     // 每个 provider 只取第一个模型（模型管理页面注册时 models 数组只有一个元素）
@@ -119,11 +155,16 @@ export const NodeTools = () => {
     return key.includes('jimengvideo') || key === 'jimengvideo30';
   }, [form.model]);
 
+  const seedreamConfig = useMemo(() => (form.modelConfig || {}) as DoubaoSeedreamConfig, [form.modelConfig]);
+  const soraConfig = useMemo(() => (form.modelConfig || {}) as SoraVideoConfig, [form.modelConfig]);
+
   // Show aspect ratio for nano-banana and jimeng-video models
   const showAspectRatio = isNanoBananaModel || isJimengVideoModel;
 
   const supportsAssetInput =
-    selectedProviderType === ProviderType.IMAGE || selectedProviderType === ProviderType.VIDEO;
+    selectedProviderType === ProviderType.IMAGE ||
+    selectedProviderType === ProviderType.VIDEO ||
+    isSoraModel(form.model);
 
   const previewImages = useMemo(() => {
     if (!testResult) return [];
@@ -135,9 +176,18 @@ export const NodeTools = () => {
   // Video preview URLs
   const previewVideos = useMemo(() => {
     if (!testResult) return [];
-    const urls = [...(testResult.mediaUrls || [])];
-    if (testResult.outputText) urls.push(testResult.outputText);
-    return Array.from(new Set(urls.filter((url) => isVideoUrl(url))));
+    const savedUrls = testResult.savedAssets?.map((a) => a.url).filter(isVideoUrl);
+    if (savedUrls && savedUrls.length) {
+      return Array.from(new Set(savedUrls));
+    }
+    if (testResult.mediaUrls?.length) {
+      const first = testResult.mediaUrls.find((url) => isVideoUrl(url));
+      return first ? [first] : [];
+    }
+    if (testResult.outputText && isVideoUrl(testResult.outputText)) {
+      return [testResult.outputText];
+    }
+    return [];
   }, [testResult]);
 
   const loadTools = async () => {
@@ -161,10 +211,20 @@ export const NodeTools = () => {
     setProviders(list);
   };
 
+  const loadAssetSpaces = async () => {
+    try {
+      const list = await assetSpaceService.listAssetSpaces();
+      setAssetSpaces(list);
+    } catch (error) {
+      console.error('[node-tools] failed to load asset spaces', error);
+    }
+  };
+
   useEffect(() => {
     loadTools();
     loadPromptVersions();
     loadProviders();
+    loadAssetSpaces();
   }, []);
 
   useEffect(() => {
@@ -202,14 +262,33 @@ export const NodeTools = () => {
     });
   }, [form.promptTemplateVersionId, promptVersions]);
 
+  useEffect(() => {
+    if (!isSoraModel(form.model)) return;
+    setForm((prev) => {
+      const exists = prev.inputs.some((item) => item.key === 'input_reference');
+      if (exists) return prev;
+      return {
+        ...prev,
+        inputs: [
+          ...prev.inputs,
+          { key: 'input_reference', name: '参考图', type: 'asset_file' as WorkflowValueType, required: true },
+        ],
+      };
+    });
+  }, [form.model]);
+
   const handleSelectTool = (tool: NodeTool) => {
     setForm({
       id: tool.id,
       name: tool.name,
       description: tool.description || '',
       promptTemplateVersionId: tool.promptTemplateVersionId || undefined,
+      systemPromptVersionId: tool.systemPromptVersionId || undefined,
       model: tool.model || undefined,
-      imageAspectRatio: tool.imageAspectRatio || '16:9',
+      imageAspectRatio: tool.imageAspectRatio || undefined,
+      maxTokens: tool.maxTokens ?? 8000,
+      temperature: tool.temperature ?? 0.7,
+      modelConfig: tool.modelConfig || undefined,
       enabled: tool.enabled,
       inputs: tool.inputs || [],
       outputs: tool.outputs || [],
@@ -217,6 +296,7 @@ export const NodeTools = () => {
     setTestInputs({});
     setTestFiles({});
     setTestResult(null);
+    setSelectedTestSpaceId('');
   };
 
   const handleSave = async () => {
@@ -225,8 +305,12 @@ export const NodeTools = () => {
       name: form.name,
       description: form.description,
       promptTemplateVersionId: form.promptTemplateVersionId,
+      systemPromptVersionId: form.systemPromptVersionId,
       model: form.model,
       imageAspectRatio: form.imageAspectRatio,
+      maxTokens: form.maxTokens,
+      temperature: form.temperature,
+      modelConfig: form.modelConfig,
       enabled: form.enabled,
       inputs: form.inputs,
       outputs: form.outputs,
@@ -337,9 +421,18 @@ export const NodeTools = () => {
             (() => {
               const formData = new FormData();
               formData.append('promptTemplateVersionId', String(form.promptTemplateVersionId));
+              if (form.systemPromptVersionId) formData.append('systemPromptVersionId', String(form.systemPromptVersionId));
               if (form.model) formData.append('model', form.model);
-              if (form.imageAspectRatio) formData.append('imageAspectRatio', form.imageAspectRatio);
+              // Only send imageAspectRatio for non-doubao-seedream models
+              if (form.imageAspectRatio && !isDoubaoSeedreamModel(form.model)) {
+                formData.append('imageAspectRatio', form.imageAspectRatio);
+              }
+              if (form.maxTokens !== undefined) formData.append('maxTokens', String(form.maxTokens));
+              if (form.temperature !== undefined) formData.append('temperature', String(form.temperature));
+              if (form.modelConfig) formData.append('modelConfig', JSON.stringify(form.modelConfig));
+              if (selectedTestSpaceId) formData.append('spaceId', String(selectedTestSpaceId));
               formData.append('inputs', JSON.stringify(parsedInputs));
+              if (form.outputs.length > 0) formData.append('outputs', JSON.stringify(form.outputs));
               Object.entries(testFiles).forEach(([key, files]) => {
                 (files || []).forEach((file) => formData.append(key, file));
               });
@@ -348,9 +441,16 @@ export const NodeTools = () => {
           )
         : await nodeToolService.testNodeTool({
             promptTemplateVersionId: form.promptTemplateVersionId,
+            systemPromptVersionId: form.systemPromptVersionId,
             model: form.model,
-            imageAspectRatio: form.imageAspectRatio,
+            // Only send imageAspectRatio for non-doubao-seedream models
+            imageAspectRatio: isDoubaoSeedreamModel(form.model) ? undefined : form.imageAspectRatio,
+            maxTokens: form.maxTokens,
+            temperature: form.temperature,
+            modelConfig: form.modelConfig,
             inputs: parsedInputs,
+            outputs: form.outputs.length > 0 ? form.outputs : undefined,
+            spaceId: selectedTestSpaceId ? Number(selectedTestSpaceId) : undefined,
           });
       setTestResult(result);
     } catch (error: any) {
@@ -436,7 +536,7 @@ export const NodeTools = () => {
                 })
               }
             >
-              <option value="">选择 Prompt 模板版本</option>
+              <option value="">选择 User Prompt 模板版本</option>
               {promptVersions.map((version) => (
                 <option key={version.id} value={version.id}>
                   {version.templateName} · {version.name || '未命名版本'}
@@ -445,10 +545,37 @@ export const NodeTools = () => {
             </select>
             {form.promptTemplateVersionId && (
               <div className={styles.variableHint}>
-                Prompt 变量：
+                User Prompt 变量：
                 {(promptVersions.find((item) => item.id === form.promptTemplateVersionId)?.variables || []).join(', ') ||
                   '无'}
               </div>
+            )}
+            {selectedProviderType === ProviderType.LLM && (
+              <>
+                <select
+                  value={form.systemPromptVersionId || ''}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      systemPromptVersionId: event.target.value ? Number(event.target.value) : undefined,
+                    })
+                  }
+                >
+                  <option value="">选择 System Prompt 模板版本（可选）</option>
+                  {promptVersions.map((version) => (
+                    <option key={version.id} value={version.id}>
+                      {version.templateName} · {version.name || '未命名版本'}
+                    </option>
+                  ))}
+                </select>
+                {form.systemPromptVersionId && (
+                  <div className={styles.variableHint}>
+                    System Prompt 变量：
+                    {(promptVersions.find((item) => item.id === form.systemPromptVersionId)?.variables || []).join(', ') ||
+                      '无'}
+                  </div>
+                )}
+              </>
             )}
             <select
               value={form.model || ''}
@@ -461,19 +588,178 @@ export const NodeTools = () => {
                 </option>
               ))}
             </select>
-            {showAspectRatio && (
+            {selectedProviderType === ProviderType.LLM && (
+              <div className={styles.modelOptions}>
+                <div className={styles.llmParams}>
+                  <label>
+                    Max Tokens
+                    <input
+                      type="number"
+                      min={1}
+                      max={128000}
+                      value={form.maxTokens ?? 1000}
+                      onChange={(event) => setForm({ ...form, maxTokens: Number(event.target.value) || 1000 })}
+                    />
+                  </label>
+                  <label>
+                    Temperature
+                    <input
+                      type="number"
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      value={form.temperature ?? 0.7}
+                      onChange={(event) => setForm({ ...form, temperature: Number(event.target.value) || 0.7 })}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+            {showAspectRatio && !isDoubaoSeedreamModel(form.model) && (
               <div className={styles.modelOptions}>
                 <label>{isJimengVideoModel ? '生成视频比例' : '生成图片比例'}</label>
                 <select
-                  value={form.imageAspectRatio || '16:9'}
-                  onChange={(event) => setForm({ ...form, imageAspectRatio: event.target.value })}
+                  value={form.imageAspectRatio || ''}
+                  onChange={(event) => setForm({ ...form, imageAspectRatio: event.target.value || undefined })}
                 >
+                  <option value="">-- 选择比例 --</option>
                   {IMAGE_ASPECT_RATIOS.map((ratio) => (
                     <option key={ratio} value={ratio}>
                       {ratio}
                     </option>
                   ))}
                 </select>
+              </div>
+            )}
+            {/* Doubao Seedream 模型特定配置 */}
+            {isDoubaoSeedreamModel(form.model) && (
+              <div className={styles.modelOptions}>
+                <h4>Doubao Seedream 配置</h4>
+                <div className={styles.seedreamConfig}>
+                  <label>
+                    图像尺寸 (size)
+                    <input
+                      type="text"
+                      placeholder="1K / 2K / 4K 或 2048x2048"
+                      value={seedreamConfig?.size || ''}
+                      onChange={(e) => setForm({ 
+                        ...form, 
+                        modelConfig: { ...seedreamConfig, size: e.target.value || undefined }
+                      })}
+                    />
+                    <small>方式1: 1K/2K/4K，方式2: 宽x高（如 2048x2048）</small>
+                  </label>
+                  <label>
+                    组图功能 (sequential_image_generation)
+                    <select
+                      value={seedreamConfig?.sequential_image_generation || 'disabled'}
+                      onChange={(e) => setForm({
+                        ...form,
+                        modelConfig: { 
+                          ...seedreamConfig, 
+                          sequential_image_generation: e.target.value as 'auto' | 'disabled',
+                          // 如果切换到 disabled，清除 max_images
+                          max_images: e.target.value === 'disabled' ? undefined : seedreamConfig?.max_images,
+                        }
+                      })}
+                    >
+                      <option value="disabled">disabled（关闭组图）</option>
+                      <option value="auto">auto（自动判断）</option>
+                    </select>
+                  </label>
+                  {seedreamConfig?.sequential_image_generation === 'auto' && (
+                    <label>
+                      最大图片数量 (max_images)
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={seedreamConfig?.max_images || 1}
+                        onChange={(e) => setForm({
+                          ...form,
+                          modelConfig: { ...seedreamConfig, max_images: Number(e.target.value) || 1 }
+                        })}
+                      />
+                    </label>
+                  )}
+                  <label className={styles.checkbox}>
+                    <input
+                      type="checkbox"
+                      checked={seedreamConfig?.watermark ?? false}
+                      onChange={(e) => setForm({
+                        ...form,
+                        modelConfig: { ...seedreamConfig, watermark: e.target.checked }
+                      })}
+                    />
+                    添加水印 (watermark)
+                  </label>
+                  <label className={styles.checkbox}>
+                    <input
+                      type="checkbox"
+                      checked={seedreamConfig?.stream ?? false}
+                      onChange={(e) => setForm({
+                        ...form,
+                        modelConfig: { ...seedreamConfig, stream: e.target.checked }
+                      })}
+                    />
+                    流式输出 (stream)
+                  </label>
+                  <label>
+                    响应格式 (response_format)
+                    <select
+                      value={seedreamConfig?.response_format || 'url'}
+                      onChange={(e) => setForm({
+                        ...form,
+                        modelConfig: { 
+                          ...seedreamConfig, 
+                          response_format: e.target.value as 'url' | 'b64_json' 
+                        }
+                      })}
+                    >
+                      <option value="url">url（返回URL）</option>
+                      <option value="b64_json">b64_json（返回Base64）</option>
+                    </select>
+                  </label>
+                </div>
+                <p className={styles.hint}>
+                  💡 参考图：添加类型为 <code>asset_ref</code> 或 <code>list&lt;asset_ref&gt;</code> 的输入变量，
+                  将自动作为参考图传入 image 参数
+                </p>
+              </div>
+            )}
+            {isSoraModel(form.model) && (
+              <div className={styles.modelOptions}>
+                <h4>Sora 参数</h4>
+                <label>
+                  输出尺寸 (size)
+                  <input
+                    type="text"
+                    placeholder="默认使用参考图尺寸，例如 1280x720"
+                    value={soraConfig?.size || ''}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        modelConfig: { ...soraConfig, size: e.target.value || undefined },
+                      })
+                    }
+                  />
+                  <small>留空时会自动读取上传参考图的宽高</small>
+                </label>
+                <label>
+                  视频时长 (seconds)
+                  <select
+                    value={soraConfig?.seconds === 15 ? 15 : 10}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        modelConfig: { ...soraConfig, seconds: Number(e.target.value) },
+                      })
+                    }
+                  >
+                    <option value={10}>10 秒</option>
+                    <option value={15}>15 秒</option>
+                  </select>
+                </label>
               </div>
             )}
             <label className={styles.checkbox}>
@@ -575,6 +861,24 @@ export const NodeTools = () => {
 
         <section className={styles.panel}>
           <h3>单次测试</h3>
+          {isSoraModel(form.model) && (
+            <div className={styles.testRow}>
+              <label>保存到资产空间</label>
+              <select
+                value={selectedTestSpaceId || ''}
+                onChange={(event) =>
+                  setSelectedTestSpaceId(event.target.value ? Number(event.target.value) : '')
+                }
+              >
+                <option value="">-- 选择资产空间 --</option>
+                {assetSpaces.map((space) => (
+                  <option key={space.id} value={space.id}>
+                    {space.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {form.inputs.map((input) => (
             <div key={`test-${input.key}`} className={styles.testRow}>
               <label>{input.name || input.key}</label>
@@ -641,7 +945,27 @@ export const NodeTools = () => {
             运行测试
           </button>
           {testResult && (
-            <pre className={styles.testOutput}>{JSON.stringify(testResult, null, 2)}</pre>
+            <div className={styles.testResultContainer}>
+              {testResult.error && (
+                <div className={styles.testError}>❌ {testResult.error}</div>
+              )}
+              {testResult.durationMs > 0 && (
+                <div className={styles.testDuration}>⏱️ 耗时: {(testResult.durationMs / 1000).toFixed(2)}s</div>
+              )}
+              {!!testResult.savedAssets?.length && (
+                <div className={styles.savedJsonAssets}>
+                  <strong>📁 已保存到资产空间:</strong>
+                  <div className={styles.assetLinks}>
+                    {testResult.savedAssets.map((asset) => (
+                      <a key={asset.id} href={asset.url} target="_blank" rel="noreferrer">
+                        {asset.filename}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <pre className={styles.testOutput}>{JSON.stringify(testResult, null, 2)}</pre>
+            </div>
           )}
           {previewImages.length > 0 && (
             <div className={styles.imagePreview}>

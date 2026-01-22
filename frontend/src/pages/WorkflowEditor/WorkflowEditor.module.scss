@@ -284,3 +284,47 @@
   max-height: 200px;
   overflow: auto;
 }
+
+.savedJsonAssets {
+  background: var(--color-bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-sm);
+  font-size: 12px;
+  margin-top: var(--spacing-sm);
+}
+
+.savedJsonAssets strong {
+  display: block;
+  margin-bottom: var(--spacing-xs);
+  color: var(--color-primary);
+}
+
+.nodeJsonAssets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.nodeJsonAssets:last-child {
+  border-bottom: none;
+}
+
+.nodeName {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.assetLink {
+  color: var(--color-link);
+  text-decoration: none;
+  font-size: 11px;
+}
+
+.assetLink:hover {
+  text-decoration: underline;
+}

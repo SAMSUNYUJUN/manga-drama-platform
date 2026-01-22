@@ -36,6 +36,12 @@ export const downloadAsset = async (id: number): Promise<{ url: string }> => {
   return response.data.data!;
 };
 
+// 获取资产文件的文本内容
+export const getAssetTextContent = async (id: number): Promise<string> => {
+  const response = await api.get<ApiResponse<{ content: string }>>(`/assets/${id}/content`);
+  return response.data.data!.content;
+};
+
 export const hardDeleteAsset = async (id: number, confirmToken: string): Promise<void> => {
   await api.delete(`/assets/${id}`, { params: { confirmToken } });
 };

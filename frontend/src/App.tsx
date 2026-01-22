@@ -19,6 +19,7 @@ import { Assets } from './pages/Assets';
 import { Trash } from './pages/Trash';
 import { AdminProviders } from './pages/AdminProviders';
 import { NodeTools } from './pages/NodeTools';
+import Workbench from './pages/Workbench';
 import './App.css';
 
 // 受保护的路由组件
@@ -176,6 +177,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <NodeTools />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/workbench"
+            element={
+              <ProtectedRoute>
+                <Workbench />
               </ProtectedRoute>
             }
           />

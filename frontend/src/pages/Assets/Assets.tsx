@@ -26,6 +26,8 @@ export const Assets = () => {
   const [loadError, setLoadError] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [assetError, setAssetError] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
 
   const loadSpaces = async () => {
     try {
@@ -43,15 +45,17 @@ export const Assets = () => {
     }
   };
 
-  const loadAssets = async (spaceId?: number | null) => {
+  const loadAssets = async (spaceId?: number | null, pageNum: number = 1) => {
     if (!spaceId) {
       setAssets([]);
       return;
     }
     try {
       setAssetError('');
-      const data = await assetService.listAssets({ spaceId, status: AssetStatus.ACTIVE });
+      const data = await assetService.listAssets({ spaceId, status: AssetStatus.ACTIVE, page: pageNum, limit: 20 });
       setAssets(data.items);
+      setPage(data.page);
+      setTotalPages(data.totalPages || 1);
     } catch (error: any) {
       setAssets([]);
       setAssetError(error?.message || '资产加载失败');
@@ -63,7 +67,7 @@ export const Assets = () => {
   }, []);
 
   useEffect(() => {
-    loadAssets(selectedSpaceId);
+    loadAssets(selectedSpaceId, 1);
   }, [selectedSpaceId]);
 
   const handleTrash = async (id: number) => {
@@ -113,7 +117,7 @@ export const Assets = () => {
       setUploadError('');
       await assetSpaceService.uploadAssetsToSpace(selectedSpaceId, uploadFiles);
       setUploadFiles([]);
-      await loadAssets(selectedSpaceId);
+      await loadAssets(selectedSpaceId, 1);
     } catch (error: any) {
       setUploadError(error?.message || '上传失败');
     } finally {
@@ -221,6 +225,27 @@ export const Assets = () => {
             ))}
             {selectedSpaceId && assets.length === 0 && (
               <div className={styles.empty}>当前空间还没有资产。</div>
+            )}
+            {selectedSpaceId && totalPages > 1 && (
+              <div className={styles.pagination}>
+                <button
+                  className="btn btn--outline btn--sm"
+                  disabled={page <= 1}
+                  onClick={() => loadAssets(selectedSpaceId, page - 1)}
+                >
+                  上一页
+                </button>
+                <span className={styles.pageInfo}>
+                  第 {page} / {totalPages} 页
+                </span>
+                <button
+                  className="btn btn--outline btn--sm"
+                  disabled={page >= totalPages}
+                  onClick={() => loadAssets(selectedSpaceId, page + 1)}
+                >
+                  下一页
+                </button>
+              </div>
             )}
             {!selectedSpaceId && <div className={styles.empty}>请选择左侧空间查看资产。</div>}
           </div>

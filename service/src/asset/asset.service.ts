@@ -244,4 +244,38 @@ export class AssetService {
     }
     return restored;
   }
+
+  /**
+   * 获取资产的文本内容
+   * 用于读取 txt, json, jsonl 等文本文件的内容
+   */
+  async getTextContent(id: number, user: User): Promise<string> {
+    const asset = await this.findOne(id, user);
+    
+    // 检查文件类型是否支持
+    const filename = asset.filename?.toLowerCase() || '';
+    const mimeType = asset.mimeType?.toLowerCase() || '';
+    
+    const isTextFile = 
+      filename.endsWith('.txt') ||
+      filename.endsWith('.json') ||
+      filename.endsWith('.jsonl') ||
+      filename.endsWith('.md') ||
+      filename.endsWith('.csv') ||
+      filename.endsWith('.xml') ||
+      filename.endsWith('.html') ||
+      filename.endsWith('.doc') ||
+      filename.endsWith('.docx') ||
+      mimeType.includes('text/') ||
+      mimeType.includes('application/json') ||
+      mimeType.includes('application/xml');
+    
+    if (!isTextFile) {
+      throw new BadRequestException('This asset type does not support text content retrieval');
+    }
+    
+    // 从存储中获取文件内容
+    const content = await this.storageService.getTextContent(asset.url);
+    return content;
+  }
 }

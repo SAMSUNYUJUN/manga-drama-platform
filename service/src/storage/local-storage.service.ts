@@ -128,4 +128,25 @@ export class LocalStorageService implements IStorageService {
     if (relativePath.startsWith('http')) return relativePath;
     return `${this.baseUrl}/${relativePath.replace(/\\/g, '/')}`;
   }
+
+  async getTextContent(urlOrPath: string): Promise<string> {
+    try {
+      // 如果是完整 URL，需要转换为本地路径
+      let localPath: string;
+      if (urlOrPath.startsWith('http')) {
+        // 从 URL 中提取相对路径
+        const baseUrlWithoutProtocol = this.baseUrl.replace(/^https?:\/\/[^/]+/, '');
+        const relativePath = urlOrPath.replace(this.baseUrl, '').replace(/^\//, '');
+        localPath = path.join(this.uploadDir, relativePath);
+      } else {
+        localPath = path.join(this.uploadDir, urlOrPath);
+      }
+      
+      const content = await fs.readFile(localPath, 'utf-8');
+      return content;
+    } catch (error) {
+      this.logger.error(`读取文件内容失败: ${error.message}`);
+      throw new Error(`Failed to read file content: ${error.message}`);
+    }
+  }
 }

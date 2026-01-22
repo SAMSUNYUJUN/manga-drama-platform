@@ -34,4 +34,9 @@ export interface IStorageService {
    * 获取文件访问 URL
    */
   getUrl(path: string): string;
+
+  /**
+   * 获取文件的文本内容
+   */
+  getTextContent(urlOrPath: string): Promise<string>;
 }

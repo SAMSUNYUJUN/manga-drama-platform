@@ -160,7 +160,12 @@ export const getListInnerType = (valueType: WorkflowValueType): WorkflowValueTyp
 };
 
 export const isTypeCompatible = (source: WorkflowValueType, target: WorkflowValueType) => {
+  const isAsset = (type: WorkflowValueType) => type === 'asset_ref' || type === 'asset_file';
+  const isAssetList = (type: WorkflowValueType) => type === 'list<asset_ref>' || type === 'list<asset_file>';
+
   if (source === target) return { ok: true as const };
+  if (isAsset(source) && isAsset(target)) return { ok: true as const };
+  if (isAssetList(source) && isAssetList(target)) return { ok: true as const };
   if (source === 'json' && target === 'text') return { ok: true as const, transform: 'stringify' as const };
   if (source === 'text' && target === 'json') return { ok: true as const, transform: 'parse_json' as const };
   return { ok: false as const };

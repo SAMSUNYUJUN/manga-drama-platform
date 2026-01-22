@@ -88,11 +88,7 @@ export class SeedService implements OnModuleInit {
         videoProvider.modelsJson = JSON.stringify(['jimeng-video-3.0']);
         needsUpdate = true;
       }
-      // Update API key if empty
-      if (!videoProvider.apiKey) {
-        videoProvider.apiKey = 'sk-XXCknLNDrvMzlP5xH8TdNktmi0ELONh5YFB5zix6omkzzoUi';
-        needsUpdate = true;
-      }
+      // API keys should be configured via admin UI at /admin/providers
       if (needsUpdate) {
         await this.providerRepository.save(videoProvider);
         this.logger.log('Updated VIDEO provider to jimeng-video-3.0');

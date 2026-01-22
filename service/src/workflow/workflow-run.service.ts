@@ -41,6 +41,7 @@ import { PromptService } from '../prompt/prompt.service';
 import type { IStorageService } from '../storage/storage.interface';
 import { Inject } from '@nestjs/common';
 import { User } from '../database/entities';
+import { InputAssetFile } from '../ai-service/types';
 import { StartWorkflowRunDto, ReviewDecisionDto, ReviewUploadDto, HumanSelectDto, CreateWorkflowRunDto, NodeTestDto, WorkflowTestDto } from './dto';
 import axios from 'axios';
 import * as path from 'path';
@@ -539,7 +540,21 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             templateVersionId: promptTemplateVersionId,
             variables: renderVariables,
           });
-          const outputText = await this.aiService.generateText(rendered.rendered, config.model);
+          // Render system prompt if configured
+          let systemPrompt: string | undefined;
+          if (config.systemPromptVersionId) {
+            const systemRendered = await this.promptService.renderPrompt({
+              templateVersionId: config.systemPromptVersionId,
+              variables: renderVariables,
+            });
+            systemPrompt = systemRendered.rendered;
+          }
+          const outputText = await this.aiService.generateText(
+            rendered.rendered,
+            config.model,
+            systemPrompt,
+            { maxTokens: config.maxTokens, temperature: config.temperature },
+          );
           return {
             outputs: { output: outputText, renderedPrompt: rendered.rendered, missingVariables: rendered.missingVariables },
             logs,
@@ -689,6 +704,9 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           error = result.error;
         }
         let assetUrls: string[] | undefined;
+        let savedJsonAssets: { id: number; url: string; filename: string }[] | undefined;
+        
+        // Save media assets (image/video)
         if (this.hasAssetRefOutputs(node)) {
           const mediaUrls = this.collectTestMediaUrls(result.outputs);
           if (mediaUrls.length) {
@@ -696,6 +714,14 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             assetUrls = assets.map((asset) => asset.url);
           }
         }
+        
+        // Save JSON assets for json/list<json> output types (use toolOutputs from result if available)
+        const toolOutputs = result.outputs?.toolOutputs || [];
+        const hasJsonOutput = toolOutputs.some((o: any) => o.type === 'json' || o.type === 'list<json>') || this.hasJsonOutputs(node);
+        if (hasJsonOutput && result.outputs) {
+          savedJsonAssets = await this.saveTestJsonAssetsWithToolOutputs(node, result.outputs, toolOutputs, user, testSpaceId, dto.templateId);
+        }
+        
         const primaryOutput = this.getPrimaryOutputValue(node, result.outputs);
         outputs = this.buildOutputVariables(node, primaryOutput, undefined, assetUrls);
         nodeResults.push({
@@ -704,6 +730,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           inputs,
           outputs,
           rawOutputs: result.outputs,
+          savedJsonAssets,
           error,
           durationMs,
         });
@@ -833,16 +860,22 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     const config = node.data?.config || {};
     try {
       if (node.type === WorkflowNodeType.LLM_TOOL) {
-        let promptTemplateVersionId = config.promptTemplateVersionId;
-        let model = config.model;
-        let imageAspectRatio = config.imageAspectRatio;
+        // 1. 首先从节点工具获取所有配置（作为基础配置）
         let tool: any;
-        if ((promptTemplateVersionId === undefined || model === undefined) && node.data?.toolId) {
+        if (node.data?.toolId) {
           tool = await this.nodeToolService.getTool(node.data.toolId);
-          promptTemplateVersionId = promptTemplateVersionId ?? tool.promptTemplateVersionId ?? undefined;
-          model = model ?? tool.model ?? undefined;
-          imageAspectRatio = imageAspectRatio ?? tool.imageAspectRatio ?? '16:9';
         }
+        
+        // 2. 使用节点工具配置作为默认值，节点级别配置可以覆盖
+        const promptTemplateVersionId = config.promptTemplateVersionId ?? tool?.promptTemplateVersionId ?? undefined;
+        const systemPromptVersionId = config.systemPromptVersionId ?? tool?.systemPromptVersionId ?? undefined;
+        const model = config.model ?? tool?.model ?? undefined;
+        const imageAspectRatio = config.imageAspectRatio ?? tool?.imageAspectRatio;
+        const maxTokens = config.maxTokens ?? tool?.maxTokens ?? 1000;
+        const temperature = config.temperature ?? tool?.temperature ?? 0.7;
+        const toolOutputs = tool?.outputs || [];
+        const modelConfig = config.modelConfig ?? tool?.modelConfig ?? undefined;
+        
         if (!promptTemplateVersionId) {
           throw new BadRequestException('promptTemplateVersionId is required for LLM tool test');
         }
@@ -851,6 +884,15 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           templateVersionId: promptTemplateVersionId,
           variables: renderVariables,
         });
+        // Render system prompt if configured
+        let systemPrompt: string | undefined;
+        if (systemPromptVersionId) {
+          const systemRendered = await this.promptService.renderPrompt({
+            templateVersionId: systemPromptVersionId,
+            variables: renderVariables,
+          });
+          systemPrompt = systemRendered.rendered;
+        }
         const providerType = await this.resolveToolProviderType(model, node, tool);
         if (providerType === ProviderType.IMAGE || providerType === ProviderType.VIDEO) {
           const inputAssetUrls = await this.collectAssetUrlsFromInputs(inputs);
@@ -864,8 +906,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           const inputImages = await this.prepareInputImagesForModel(inputAssetUrls, model, { forceDataUri: true });
           const media =
             providerType === ProviderType.IMAGE
-              ? await this.aiService.generateImage(rendered.rendered, model, inputImages, { imageAspectRatio })
-              : await this.aiService.generateVideo(rendered.rendered, model, inputImages, { imageAspectRatio });
+              ? await this.aiService.generateImage(rendered.rendered, model, inputImages, { imageAspectRatio, modelConfig })
+              : await this.aiService.generateVideo(rendered.rendered, model, inputImages, { imageAspectRatio, modelConfig });
           const urls = media.map((item) =>
             item.url
               ? item.url
@@ -878,9 +920,23 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             durationMs: Date.now() - start,
           };
         }
-        const outputText = await this.aiService.generateText(rendered.rendered, model);
+        
+        console.log('[runWorkflowNodeTest] LLM call params:', {
+          model,
+          hasSystemPrompt: !!systemPrompt,
+          maxTokens,
+          temperature,
+          toolOutputTypes: toolOutputs.map((o: any) => `${o.key}:${o.type}`),
+        });
+        
+        const outputText = await this.aiService.generateText(
+          rendered.rendered,
+          model,
+          systemPrompt,
+          { maxTokens, temperature },
+        );
         return {
-          outputs: { output: outputText, renderedPrompt: rendered.rendered, missingVariables: rendered.missingVariables },
+          outputs: { output: outputText, renderedPrompt: rendered.rendered, missingVariables: rendered.missingVariables, toolOutputs },
           durationMs: Date.now() - start,
         };
       }
@@ -1099,17 +1155,34 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
         }
         case WorkflowNodeType.LLM_TOOL: {
           const toolConfig = node.data?.config || {};
-          let promptTemplateVersionId = toolConfig.promptTemplateVersionId;
-          let model = toolConfig.model;
+          
+          // 1. 首先从节点工具获取所有配置（作为基础配置）
           let tool: any;
-          if ((promptTemplateVersionId === undefined || model === undefined) && node.data?.toolId) {
+          if (node.data?.toolId) {
             tool = await this.nodeToolService.getTool(node.data.toolId);
-            promptTemplateVersionId = promptTemplateVersionId ?? tool.promptTemplateVersionId ?? undefined;
-            model = model ?? tool.model ?? undefined;
           }
+          
+          // 2. 使用节点工具配置作为默认值，节点级别配置可以覆盖
+          const promptTemplateVersionId = toolConfig.promptTemplateVersionId ?? tool?.promptTemplateVersionId ?? undefined;
+          const systemPromptVersionId = toolConfig.systemPromptVersionId ?? tool?.systemPromptVersionId ?? undefined;
+          const model = toolConfig.model ?? tool?.model ?? undefined;
+          const maxTokens = toolConfig.maxTokens ?? tool?.maxTokens ?? 1000;
+          const temperature = toolConfig.temperature ?? tool?.temperature ?? 0.7;
+          const imageAspectRatio = toolConfig.imageAspectRatio ?? tool?.imageAspectRatio;
+          const modelConfig = toolConfig.modelConfig ?? tool?.modelConfig ?? undefined;
+          
           if (!promptTemplateVersionId) {
             throw new BadRequestException('LLM tool missing prompt template version');
           }
+          
+          console.log(`[LLM_TOOL executeNode] params:`, {
+            toolId: node.data?.toolId,
+            model,
+            hasSystemPrompt: !!systemPromptVersionId,
+            maxTokens,
+            temperature,
+          });
+          
           const renderVariables = this.normalizePromptVariables(inputVariables);
           console.log(`[LLM_TOOL] inputVariables: ${JSON.stringify(inputVariables)}`);
           console.log(`[LLM_TOOL] renderVariables: ${JSON.stringify(renderVariables)}`);
@@ -1117,6 +1190,15 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             templateVersionId: promptTemplateVersionId,
             variables: renderVariables,
           });
+          // Render system prompt if configured
+          let systemPrompt: string | undefined;
+          if (systemPromptVersionId) {
+            const systemRendered = await this.promptService.renderPrompt({
+              templateVersionId: systemPromptVersionId,
+              variables: renderVariables,
+            });
+            systemPrompt = systemRendered.rendered;
+          }
           console.log(`[LLM_TOOL] rendered prompt: ${JSON.stringify(rendered.rendered).slice(0, 200)}`);
           const providerType = await this.resolveToolProviderType(model, node, tool);
           console.log(`[LLM_TOOL] providerType: ${providerType}`);
@@ -1128,7 +1210,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
             const count = toolConfig.outputCount || 1;
             const assets = await this.generateMediaAssets(
               run,
-              providerType === ProviderType.IMAGE ? AssetType.TASK_EXECUTION : AssetType.TASK_EXECUTION,
+              AssetType.TASK_EXECUTION,
               rendered.rendered,
               count,
               providerType === ProviderType.IMAGE ? 'image' : 'video',
@@ -1136,6 +1218,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
               model,
               inputImages,
               nodeName,
+              { imageAspectRatio, modelConfig },
             );
             console.log(`[LLM_TOOL] Generated ${assets.length} assets`);
             const assetIds = assets.map((asset) => asset.id);
@@ -1147,7 +1230,12 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
               variables: this.buildOutputVariables(node, assetUrls, assetIds, assetUrls),
             };
           } else {
-            const outputText = await this.aiService.generateText(rendered.rendered, model);
+            const outputText = await this.aiService.generateText(
+              rendered.rendered,
+              model,
+              systemPrompt,
+              { maxTokens, temperature },
+            );
             const outputDef = node.data?.outputs?.[0];
             const outputType = outputDef?.type || 'text';
             let savedAssets: Asset[] = [];
@@ -1661,7 +1749,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     assetIds?: number[],
     assetUrls?: string[],
   ) {
-    if (type === 'list<asset_ref>') {
+    if (type === 'list<asset_ref>' || type === 'list<asset_file>') {
       if (assetUrls && assetUrls.length) return assetUrls;
       if (assetIds && assetIds.length) return assetIds;
       if (value && typeof value === 'object' && Array.isArray((value as any).mediaUrls)) {
@@ -1678,7 +1766,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       if (assetIds) return assetIds;
       return value !== undefined ? [value] : [];
     }
-    if (type === 'asset_ref') {
+    if (type === 'asset_ref' || type === 'asset_file') {
       if (assetUrls && assetUrls.length) return assetUrls[0];
       if (typeof value === 'number') return value;
       if (Array.isArray(assetIds) && assetIds.length) return assetIds[0];
@@ -1720,11 +1808,11 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
   }
 
   private isImageValueType(type?: string) {
-    return type === 'asset_ref';
+    return type === 'asset_ref' || type === 'asset_file';
   }
 
   private isImageListType(type?: string) {
-    return type === 'list<asset_ref>';
+    return type === 'list<asset_ref>' || type === 'list<asset_file>';
   }
 
   private isVideoValueType(type?: string) {
@@ -1808,6 +1896,209 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     return outputs.some(
       (output: any) => this.isMediaType(output.type),
     );
+  }
+
+  /**
+   * Check if node has json or list<json> outputs
+   */
+  private hasJsonOutputs(node: any) {
+    const outputs = node.data?.outputs || [];
+    return outputs.some(
+      (output: any) => output.type === 'json' || output.type === 'list<json>',
+    );
+  }
+
+  /**
+   * Save JSON outputs as assets for workflow test
+   */
+  private async saveTestJsonAssets(
+    node: any,
+    outputs: any,
+    user: User,
+    spaceId?: number | null,
+    templateId?: number,
+  ): Promise<{ id: number; url: string; filename: string }[]> {
+    const outputDefs = (node.data?.outputs || []).filter(
+      (o: any) => o.type === 'json' || o.type === 'list<json>',
+    );
+    const savedAssets: { id: number; url: string; filename: string }[] = [];
+    
+    for (const outputDef of outputDefs) {
+      const value = outputs?.[outputDef.key] ?? outputs?.output;
+      if (value === undefined || value === null) continue;
+      
+      // Try to parse if it's a string
+      let jsonValue = value;
+      if (typeof value === 'string') {
+        try {
+          jsonValue = JSON.parse(value);
+        } catch {
+          // Keep as string if parsing fails
+          continue;
+        }
+      }
+      
+      const isList = outputDef.type === 'list<json>';
+      
+      let content: string;
+      let mimeType: string;
+      let ext: string;
+      
+      if (isList) {
+        const items = Array.isArray(jsonValue) ? jsonValue : [jsonValue];
+        content = items.map(item => JSON.stringify(item)).join('\n');
+        mimeType = 'application/x-ndjson';
+        ext = 'jsonl';
+      } else {
+        content = JSON.stringify(jsonValue, null, 2);
+        mimeType = 'application/json';
+        ext = 'json';
+      }
+      
+      // Use same filename format as other assets: {prefix}_{timestamp}.{ext}
+      const filenamePrefix = outputDef.key || 'workflow_test';
+      const filename = this.buildFilename(filenamePrefix, ext);
+      const buffer = Buffer.from(content, 'utf-8');
+      const folder = this.buildWorkflowTestFolder(user.id, spaceId, templateId);
+      
+      const url = await this.storageService.uploadBuffer(buffer, filename, {
+        folder,
+        contentType: mimeType,
+        isPublic: false,
+      });
+      
+      const asset = await this.assetRepository.save(
+        this.assetRepository.create({
+          taskId: null,
+          versionId: null,
+          spaceId: spaceId ?? null,
+          type: AssetType.WORKFLOW_TEST,
+          status: AssetStatus.ACTIVE,
+          url,
+          filename,
+          filesize: buffer.length,
+          mimeType,
+          metadataJson: JSON.stringify({
+            workflowTest: true,
+            templateId: templateId ?? null,
+            nodeId: node.id,
+            outputKey: outputDef.key,
+            isList,
+          }),
+        }),
+      );
+      
+      savedAssets.push({
+        id: asset.id,
+        url: asset.url,
+        filename: asset.filename,
+      });
+    }
+    
+    return savedAssets;
+  }
+
+  /**
+   * Save JSON assets using tool outputs definition (preferred) or node outputs
+   */
+  private async saveTestJsonAssetsWithToolOutputs(
+    node: any,
+    outputs: any,
+    toolOutputs: any[],
+    user: User,
+    spaceId?: number | null,
+    templateId?: number,
+  ): Promise<{ id: number; url: string; filename: string }[]> {
+    // Use tool outputs if available, otherwise fall back to node outputs
+    const outputDefs = toolOutputs.length > 0 
+      ? toolOutputs.filter((o: any) => o.type === 'json' || o.type === 'list<json>')
+      : (node.data?.outputs || []).filter((o: any) => o.type === 'json' || o.type === 'list<json>');
+    
+    const savedAssets: { id: number; url: string; filename: string }[] = [];
+    
+    for (const outputDef of outputDefs) {
+      // Try to get value from outputs by key, or use 'output' as fallback for LLM text output
+      const value = outputs?.[outputDef.key] ?? outputs?.output;
+      if (value === undefined || value === null) continue;
+      
+      // Try to parse if it's a string
+      let jsonValue = value;
+      if (typeof value === 'string') {
+        try {
+          jsonValue = JSON.parse(value);
+        } catch {
+          // Keep raw string if parsing fails - still save it
+          console.log('[saveTestJsonAssetsWithToolOutputs] JSON parse failed, saving raw text');
+        }
+      }
+      
+      const isList = outputDef.type === 'list<json>';
+      
+      let content: string;
+      let mimeType: string;
+      let ext: string;
+      
+      if (isList) {
+        const items = Array.isArray(jsonValue) ? jsonValue : [jsonValue];
+        content = items.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
+        mimeType = 'application/x-ndjson';
+        ext = 'jsonl';
+      } else {
+        content = typeof jsonValue === 'string' ? jsonValue : JSON.stringify(jsonValue, null, 2);
+        mimeType = 'application/json';
+        ext = 'json';
+      }
+      
+      // Use same filename format as other assets: {prefix}_{timestamp}.{ext}
+      const filenamePrefix = outputDef.key || 'workflow_test';
+      const filename = this.buildFilename(filenamePrefix, ext);
+      const buffer = Buffer.from(content, 'utf-8');
+      const folder = this.buildWorkflowTestFolder(user.id, spaceId, templateId);
+      
+      console.log('[saveTestJsonAssetsWithToolOutputs] Saving JSON asset:', { 
+        outputKey: outputDef.key, 
+        type: outputDef.type, 
+        filename, 
+        contentLength: content.length 
+      });
+      
+      const url = await this.storageService.uploadBuffer(buffer, filename, {
+        folder,
+        contentType: mimeType,
+        isPublic: false,
+      });
+      
+      const asset = await this.assetRepository.save(
+        this.assetRepository.create({
+          taskId: null,
+          versionId: null,
+          spaceId: spaceId ?? null,
+          type: AssetType.WORKFLOW_TEST,
+          status: AssetStatus.ACTIVE,
+          url,
+          filename,
+          filesize: buffer.length,
+          mimeType,
+          metadataJson: JSON.stringify({
+            workflowTest: true,
+            templateId: templateId ?? null,
+            nodeId: node.id,
+            outputKey: outputDef.key,
+            isList,
+          }),
+        }),
+      );
+      
+      savedAssets.push({
+        id: asset.id,
+        url: asset.url,
+        filename: asset.filename,
+      });
+      
+      console.log('[saveTestJsonAssetsWithToolOutputs] JSON asset saved:', asset.id, asset.url);
+    }
+    
+    return savedAssets;
   }
 
   private collectTestMediaUrls(outputs: any): { url: string; mediaType: 'image' | 'video' }[] {
@@ -2192,14 +2483,15 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     modelOverride?: string,
     inputImages?: string[],
     nodeName?: string,
+    options?: { imageAspectRatio?: string; modelConfig?: Record<string, any>; assetFiles?: InputAssetFile[] },
   ): Promise<Asset[]> {
     const assets: Asset[] = [];
     for (let i = 0; i < count; i += 1) {
       console.log(`[generateMediaAssets] Generating ${mediaType} ${i + 1}/${count}...`);
       const media =
         mediaType === 'image'
-          ? await this.aiService.generateImage(prompt, modelOverride, inputImages)
-          : await this.aiService.generateVideo(prompt, modelOverride, inputImages);
+          ? await this.aiService.generateImage(prompt, modelOverride, inputImages, options)
+          : await this.aiService.generateVideo(prompt, modelOverride, inputImages, options);
       console.log(`[generateMediaAssets] AI returned ${media.length} items`);
       if (!media.length) {
         throw new BadRequestException('AI provider returned no media');

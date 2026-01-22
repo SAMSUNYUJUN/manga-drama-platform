@@ -12,3 +12,4 @@ export * from './workflow.types';
 export * from './prompt.types';
 export * from './provider.types';
 export * from './node-tool.types';
+export * from './workbench.types';

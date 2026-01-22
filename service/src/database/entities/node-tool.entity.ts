@@ -20,11 +20,27 @@ export class NodeTool {
   @Column({ type: 'int', nullable: true })
   promptTemplateVersionId?: number | null;
 
+  /** System prompt version ID (for LLM nodes) */
+  @Column({ type: 'int', nullable: true })
+  systemPromptVersionId?: number | null;
+
   @Column({ type: 'varchar', length: 120, nullable: true })
   model?: string | null;
 
   @Column({ type: 'varchar', length: 20, nullable: true, default: '16:9' })
   imageAspectRatio?: string | null;
+
+  /** LLM max tokens (default: 8000) */
+  @Column({ type: 'int', nullable: true, default: 8000 })
+  maxTokens?: number | null;
+
+  /** LLM temperature (default: 0.7) */
+  @Column({ type: 'float', nullable: true, default: 0.7 })
+  temperature?: number | null;
+
+  /** 模型特定配置（JSON格式） */
+  @Column({ type: 'text', nullable: true })
+  modelConfigJson?: string | null;
 
   @Column({ type: 'text' })
   inputsJson: string;
@@ -55,5 +71,13 @@ export class NodeTool {
 
   set outputs(value: WorkflowVariable[]) {
     this.outputsJson = JSON.stringify(value || []);
+  }
+
+  get modelConfig(): any | null {
+    return this.modelConfigJson ? JSON.parse(this.modelConfigJson) : null;
+  }
+
+  set modelConfig(value: any | null) {
+    this.modelConfigJson = value ? JSON.stringify(value) : null;
   }
 }

@@ -1,7 +1,8 @@
 const https = require('https');
 
-const BASE_URL = 'https://api.qingyuntop.top';
-const API_KEY = 'sk-XXCknLNDrvMzlP5xH8TdNktmi0ELONh5YFB5zix6omkzzoUi';
+// API settings should be configured via admin UI at /admin/providers
+const BASE_URL = process.env.JIMENG_BASE_URL || 'https://api.qingyuntop.top';
+const API_KEY = process.env.JIMENG_API_KEY || '';
 
 // 查询之前创建的任务
 const TASK_ID = 'jimeng:68e5a25a-2105-4020-96fa-148b6fe5f76f';

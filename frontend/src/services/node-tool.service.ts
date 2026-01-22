@@ -39,7 +39,18 @@ export const deleteNodeTool = async (id: number): Promise<{ id: number }> => {
 };
 
 export const testNodeTool = async (
-  payload: { promptTemplateVersionId?: number; model?: string; inputs?: Record<string, any> },
+  payload: {
+    promptTemplateVersionId?: number;
+    systemPromptVersionId?: number;
+    model?: string;
+    imageAspectRatio?: string;
+    maxTokens?: number;
+    temperature?: number;
+    modelConfig?: Record<string, any>;
+    inputs?: Record<string, any>;
+    outputs?: { key: string; name?: string; type: string }[];
+    spaceId?: number;
+  },
 ): Promise<NodeToolTestResult> => {
   const response = await api.post<ApiResponse<NodeToolTestResult>>(
     '/node-tools/test',
@@ -61,10 +72,11 @@ export const testNodeToolWithFiles = async (formData: FormData): Promise<NodeToo
 export const testNodeToolById = async (
   id: number,
   inputs?: Record<string, any>,
+  spaceId?: number,
 ): Promise<NodeToolTestResult> => {
   const response = await api.post<ApiResponse<NodeToolTestResult>>(
     `/node-tools/${id}/test`,
-    { inputs },
+    { inputs, spaceId },
     { timeout: 600000 }, // 10 minutes for video generation
   );
   return response.data.data!;

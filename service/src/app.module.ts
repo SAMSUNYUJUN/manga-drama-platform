@@ -17,6 +17,7 @@ import { AdminModule } from './admin/admin.module';
 import { WorkflowModule } from './workflow/workflow.module';
 import { SeedModule } from './database/seed/seed.module';
 import { NodeToolModule } from './node-tool/node-tool.module';
+import { WorkbenchModule } from './workbench/workbench.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { NodeToolModule } from './node-tool/node-tool.module';
     AdminModule,
     WorkflowModule,
     NodeToolModule,
+    WorkbenchModule,
     SeedModule,
   ],
   controllers: [AppController],

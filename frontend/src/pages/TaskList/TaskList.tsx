@@ -14,8 +14,8 @@ import { taskService, workflowService, assetSpaceService, assetService } from '.
 import styles from './TaskList.module.scss';
 
 // 辅助函数
-const isAssetRefType = (type?: string) => type === 'asset_ref';
-const isAssetRefListType = (type?: string) => type === 'list<asset_ref>';
+const isAssetRefType = (type?: string) => type === 'asset_ref' || type === 'asset_file';
+const isAssetRefListType = (type?: string) => type === 'list<asset_ref>' || type === 'list<asset_file>';
 const isAnyAssetRefType = (type?: string) => isAssetRefType(type) || isAssetRefListType(type);
 const isVideoUrl = (value?: string) => {
   if (!value) return false;
@@ -65,6 +65,8 @@ export const TaskList = () => {
   const [assetSpaces, setAssetSpaces] = useState<AssetSpace[]>([]);
   const [spaceAssets, setSpaceAssets] = useState<Record<number, Asset[]>>({});
   const [selectedSpaceId, setSelectedSpaceId] = useState<Record<string, number | null>>({});
+  // 文本输入的资产空间选择（用于从资产空间导入文本/JSON文件）
+  const [textInputSpaceId, setTextInputSpaceId] = useState<Record<string, number | null>>({});
 
   // 执行状态
   const [executingTask, setExecutingTask] = useState<number | null>(null);
@@ -398,6 +400,86 @@ export const TaskList = () => {
     }
   };
 
+  // 从资产空间导入内容到文本输入
+  const handleTextAssetSelect = async (key: string, assetId: string) => {
+    const spaceId = textInputSpaceId[key];
+    if (!spaceId) return;
+    const assets = spaceAssets[spaceId] || [];
+    const asset = assets.find((a) => String(a.id) === assetId);
+    if (!asset) return;
+
+    const filename = asset.filename?.toLowerCase() || '';
+    const mimeType = asset.mimeType?.toLowerCase() || '';
+    const url = asset.url;
+
+    try {
+      // 文本类文件：txt, json, jsonl, md, csv, doc, docx 等 -> 通过后端API获取文本内容
+      const isTextFile = 
+        filename.endsWith('.txt') || 
+        filename.endsWith('.json') || 
+        filename.endsWith('.jsonl') ||
+        filename.endsWith('.md') ||
+        filename.endsWith('.csv') ||
+        filename.endsWith('.xml') ||
+        filename.endsWith('.html') ||
+        filename.endsWith('.doc') ||
+        filename.endsWith('.docx') ||
+        mimeType.includes('text/') || 
+        mimeType.includes('application/json') ||
+        mimeType.includes('application/xml');
+      
+      if (isTextFile) {
+        // 使用后端API获取文本内容，避免跨域问题
+        const content = await assetService.getAssetTextContent(asset.id);
+        setWorkflowInputs((prev) => ({ ...prev, [key]: content }));
+        return;
+      }
+      
+      // 图片文件
+      if (mimeType.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(filename)) {
+        // 检查是否是外部URL还是需要转base64
+        if (url.startsWith('data:')) {
+          // 已经是base64
+          setWorkflowInputs((prev) => ({ ...prev, [key]: url }));
+        } else if (url.startsWith('http://') || url.startsWith('https://')) {
+          // 尝试fetch并转为base64
+          try {
+            const response = await fetch(url);
+            const blob = await response.blob();
+            const reader = new FileReader();
+            reader.onload = () => {
+              setWorkflowInputs((prev) => ({ ...prev, [key]: reader.result as string }));
+            };
+            reader.readAsDataURL(blob);
+          } catch {
+            // 如果fetch失败（可能是跨域），直接使用URL
+            setWorkflowInputs((prev) => ({ ...prev, [key]: url }));
+          }
+        } else {
+          setWorkflowInputs((prev) => ({ ...prev, [key]: url }));
+        }
+        return;
+      }
+      
+      // 视频文件 - 直接使用URL
+      if (mimeType.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(filename)) {
+        setWorkflowInputs((prev) => ({ ...prev, [key]: url }));
+        return;
+      }
+      
+      // 其他文件：尝试通过后端API作为文本读取
+      try {
+        const content = await assetService.getAssetTextContent(asset.id);
+        setWorkflowInputs((prev) => ({ ...prev, [key]: content }));
+      } catch {
+        alert('无法读取该文件类型');
+      }
+    } catch (err) {
+      console.error('Failed to load asset content:', err);
+      alert('加载资产内容失败');
+    }
+  };
+
   const getTaskStatusLabel = (task: TaskWithRun) => {
     if (task.workflowRunStatus) {
       switch (task.workflowRunStatus) {
@@ -635,6 +717,39 @@ export const TaskList = () => {
                               accept=".txt,.doc,.docx,text/plain"
                               onChange={(e) => handleTextFileUpload(input.key, e.target.files)}
                             />
+                          </div>
+                          <div className={styles.uploadRow}>
+                            <span>或从资产空间导入：</span>
+                            <select
+                              value={textInputSpaceId[input.key] || ''}
+                              onChange={(e) => {
+                                const spaceId = e.target.value ? Number(e.target.value) : null;
+                                setTextInputSpaceId((prev) => ({ ...prev, [input.key]: spaceId }));
+                                if (spaceId) loadSpaceAssets(spaceId);
+                              }}
+                            >
+                              <option value="">选择资产空间</option>
+                              {assetSpaces.map((space) => (
+                                <option key={space.id} value={space.id}>
+                                  {space.name}
+                                </option>
+                              ))}
+                            </select>
+                            {textInputSpaceId[input.key] && (
+                              <select
+                                onChange={(e) => {
+                                  if (e.target.value) handleTextAssetSelect(input.key, e.target.value);
+                                }}
+                                defaultValue=""
+                              >
+                                <option value="">选择文件</option>
+                                {(spaceAssets[textInputSpaceId[input.key]!] || []).map((asset) => (
+                                  <option key={asset.id} value={asset.id}>
+                                    {asset.filename || `Asset #${asset.id}`}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
                           </div>
                         </div>
                       )}

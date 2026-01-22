@@ -162,4 +162,21 @@ export class AssetController {
       message: `${restored} assets restored successfully`,
     };
   }
+
+  /**
+   * 获取资产文本内容
+   * GET /api/assets/:id/content
+   */
+  @Get(':id/content')
+  async getContent(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<{ content: string }>> {
+    const content = await this.assetService.getTextContent(id, user);
+    return {
+      success: true,
+      data: { content },
+      message: 'Asset content retrieved successfully',
+    };
+  }
 }

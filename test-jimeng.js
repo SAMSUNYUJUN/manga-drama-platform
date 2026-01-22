@@ -1,8 +1,9 @@
 const https = require('https');
 const http = require('http');
 
-const BASE_URL = 'https://api.qingyuntop.top';
-const API_KEY = 'sk-XXCknLNDrvMzlP5xH8TdNktmi0ELONh5YFB5zix6omkzzoUi';
+// API settings should be configured via admin UI at /admin/providers
+const BASE_URL = process.env.JIMENG_BASE_URL || 'https://api.qingyuntop.top';
+const API_KEY = process.env.JIMENG_API_KEY || '';
 
 async function httpRequest(method, url, data = null) {
   return new Promise((resolve, reject) => {

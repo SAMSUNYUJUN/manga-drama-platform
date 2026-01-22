@@ -400,6 +400,8 @@
   gap: var(--spacing-sm);
   font-size: 13px;
   color: var(--color-text-tertiary);
+  margin-top: var(--spacing-xs);
+  flex-wrap: wrap;
   
   input[type="file"] {
     font-size: 13px;
@@ -417,6 +419,26 @@
       &:hover {
         background: var(--color-bg-secondary);
       }
+    }
+  }
+  
+  select {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    font-size: 13px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    background: var(--color-bg-primary);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    min-width: 120px;
+    
+    &:hover {
+      border-color: var(--color-primary);
+    }
+    
+    &:focus {
+      outline: none;
+      border-color: var(--color-primary);
     }
   }
 }

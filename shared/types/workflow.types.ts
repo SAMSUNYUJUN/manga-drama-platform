@@ -11,11 +11,13 @@ export type WorkflowValueType =
   | 'boolean'
   | 'json'
   | 'asset_ref'
+  | 'asset_file'
   | 'list<text>'
   | 'list<number>'
   | 'list<boolean>'
   | 'list<json>'
-  | 'list<asset_ref>';
+  | 'list<asset_ref>'
+  | 'list<asset_file>';
 
 export type WorkflowValue =
   | string
@@ -66,6 +68,12 @@ export interface WorkflowTestNodeResult {
   rawOutputs?: any;
   error?: string;
   durationMs?: number;
+  /** Saved JSON assets for json/list<json> outputs */
+  savedJsonAssets?: {
+    id: number;
+    url: string;
+    filename: string;
+  }[];
 }
 
 export interface WorkflowTestResult {

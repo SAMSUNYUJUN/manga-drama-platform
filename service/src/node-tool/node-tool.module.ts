@@ -11,9 +11,10 @@ import { NodeToolController } from './node-tool.controller';
 import { PromptModule } from '../prompt/prompt.module';
 import { AIServiceModule } from '../ai-service/ai-service.module';
 import { StorageModule } from '../storage/storage.module';
+import { AssetModule } from '../asset/asset.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([NodeTool]), PromptModule, AIServiceModule, StorageModule],
+  imports: [TypeOrmModule.forFeature([NodeTool]), PromptModule, AIServiceModule, StorageModule, AssetModule],
   providers: [NodeToolService],
   controllers: [NodeToolController],
   exports: [NodeToolService],

@@ -44,7 +44,7 @@ export class OpenAICompatibleProvider {
   async chatCompletions(payload: Record<string, any>): Promise<AxiosResponse<any>> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
     console.log('[OpenAICompatibleProvider] chatCompletions payload:', JSON.stringify(payload, null, 2).substring(0, 2000));
-    return await this.requestWithRetry(() =>
+    const response = await this.requestWithRetry(() =>
       axios.post(url, payload, {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
@@ -57,6 +57,10 @@ export class OpenAICompatibleProvider {
         validateStatus: (status) => status < 500,
       }),
     );
+    // Debug: log the response data
+    console.log('[OpenAICompatibleProvider] Response status:', response.status);
+    console.log('[OpenAICompatibleProvider] Response data:', JSON.stringify(response.data, null, 2).substring(0, 1000));
+    return response;
   }
 
   private async requestWithRetry<T>(fn: () => Promise<T>): Promise<T> {
