@@ -79,7 +79,7 @@ export interface ShotVideoItem {
   duration: number;
   frameInfoText: string;
   selectedImage?: string;
-  uploadedFile?: File | null;
+  uploadedFile?: { name?: string; size?: number; type?: string } | null;
   savedVideoUrl?: string;
   savedPath?: string;
   seconds?: 10 | 15;
