@@ -86,6 +86,7 @@ const KeyframeVideo: React.FC<KeyframeVideoProps> = ({
         frameInfoText: JSON.stringify(item, null, 2),
         selectedImage: '',
         seconds: 10,
+        isGenerating: false,
       }));
       setShots(mapped);
       if (mapped.length) {
@@ -130,11 +131,29 @@ const KeyframeVideo: React.FC<KeyframeVideoProps> = ({
   useEffect(() => {
     if (hydrated) return;
     if (initialShots?.length) {
-      const sec = (initialShots[0]?.seconds || initialSeconds || 10) as 10 | 15;
-      setShots(initialShots);
+      const normalized = initialShots.map((s) => {
+        const isFinished = s.status === 'completed' || s.status === 'failed';
+        const progressVal =
+          s.progress !== undefined
+            ? s.progress
+            : s.status === 'completed'
+            ? 100
+            : s.status === 'failed'
+            ? 0
+            : s.isGenerating
+            ? 5
+            : 0;
+        return {
+          ...s,
+          isGenerating: isFinished ? false : !!s.isGenerating,
+          progress: progressVal,
+        };
+      });
+      const sec = (normalized[0]?.seconds || initialSeconds || 10) as 10 | 15;
+      setShots(normalized);
       setSeconds(sec);
       onSecondsChange?.(sec);
-      onProgress?.(initialShots);
+      onProgress?.(normalized);
       setLoading(false);
       setHydrated(true);
       return;
@@ -151,6 +170,21 @@ const KeyframeVideo: React.FC<KeyframeVideoProps> = ({
       setSelectedShotIndex(0);
     }
   }, [selectedShotIndex, shots.length]);
+
+  useEffect(() => {
+    // Resume polling for pending jobs after navigation/hydration
+    shots.forEach((shot, index) => {
+      const inProgress =
+        shot.jobId &&
+        !progressTimers.current.get(shot.jobId) &&
+        shot.status !== 'completed' &&
+        shot.status !== 'failed' &&
+        shot.isGenerating !== false;
+      if (inProgress) {
+        startProgressPoll(shot.jobId as string, index);
+      }
+    });
+  }, [shots]);
 
   useEffect(() => {
     return () => {
@@ -228,14 +262,28 @@ const KeyframeVideo: React.FC<KeyframeVideoProps> = ({
 
   const startProgressPoll = (jobId: string, index: number) => {
     stopProgressPoll(jobId);
+    let missCount = 0;
     const timer = setInterval(async () => {
       try {
         const state = await workbenchService.getProgress(jobId);
-        if (!state) return;
+        if (!state) {
+          missCount += 1;
+          if (missCount >= 3) {
+            updateShot(index, (shot) => ({
+              ...shot,
+              status: 'failed',
+              isGenerating: false,
+            }));
+            stopProgressPoll(jobId);
+          }
+          return;
+        }
+        missCount = 0;
         updateShot(index, (shot) => ({
           ...shot,
           progress: state.progress ?? shot.progress ?? 0,
           status: state.status || shot.status,
+          isGenerating: state.status === 'completed' || state.status === 'failed' ? false : shot.isGenerating,
         }));
         if (state.status === 'completed' || state.status === 'failed') {
           stopProgressPoll(jobId);
@@ -262,8 +310,6 @@ const KeyframeVideo: React.FC<KeyframeVideoProps> = ({
       status: 'submitted',
     }));
     startProgressPoll(jobId, selectedShotIndex);
-    const stopProgress = () => {};
-
     try {
       // Validate JSON
       let parsed: any;
@@ -330,9 +376,9 @@ const KeyframeVideo: React.FC<KeyframeVideoProps> = ({
         progress: shot.progress || 0,
         isGenerating: false,
       }));
-      stopProgressPoll(selectedShot?.jobId);
+      stopProgressPoll(jobId);
     } finally {
-      stopProgress();
+      stopProgressPoll(jobId);
       updateShot(selectedShotIndex, (shot) => ({
         ...shot,
         isGenerating: false,
