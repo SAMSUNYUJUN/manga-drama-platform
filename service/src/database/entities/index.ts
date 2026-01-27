@@ -19,3 +19,5 @@ export { PromptTemplate } from './prompt-template.entity';
 export { PromptTemplateVersion } from './prompt-template-version.entity';
 export { ProviderConfig } from './provider-config.entity';
 export { GlobalConfig } from './global-config.entity';
+export { StoryboardShot } from './storyboard-shot.entity';
+export { StoryboardMessage } from './storyboard-message.entity';

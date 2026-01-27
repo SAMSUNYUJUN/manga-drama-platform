@@ -8,6 +8,8 @@ import { PromptService } from './prompt.service';
 import { ApiResponse, PromptTemplate, PromptTemplateVersion } from '@shared/types';
 import { CreatePromptTemplateDto, CreatePromptTemplateVersionDto, UpdatePromptTemplateVersionDto, RenderPromptDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards';
+import { Roles } from '../common/decorators';
+import { UserRole } from '@shared/constants';
 
 @Controller('prompts')
 @UseGuards(JwtAuthGuard)
@@ -31,6 +33,7 @@ export class PromptController {
    * POST /api/prompts
    */
   @Post()
+  @Roles(UserRole.ADMIN)
   async createTemplate(
     @Body() dto: CreatePromptTemplateDto,
   ): Promise<ApiResponse<PromptTemplate>> {
@@ -65,6 +68,7 @@ export class PromptController {
    * DELETE /api/prompts/:id
    */
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   async deleteTemplate(
     @Param('id', ParseIntPipe) id: number,
   ): Promise<ApiResponse<{ id: number }>> {
@@ -77,6 +81,7 @@ export class PromptController {
    * POST /api/prompts/:id/versions
    */
   @Post(':id/versions')
+  @Roles(UserRole.ADMIN)
   async createVersion(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreatePromptTemplateVersionDto,
@@ -127,6 +132,7 @@ export class PromptController {
    * PATCH /api/prompts/:id/versions/:versionId
    */
   @Patch(':id/versions/:versionId')
+  @Roles(UserRole.ADMIN)
   async updateVersion(
     @Param('id', ParseIntPipe) id: number,
     @Param('versionId', ParseIntPipe) versionId: number,
@@ -145,6 +151,7 @@ export class PromptController {
    * DELETE /api/prompts/:id/versions/:versionId
    */
   @Delete(':id/versions/:versionId')
+  @Roles(UserRole.ADMIN)
   async deleteVersion(
     @Param('id', ParseIntPipe) id: number,
     @Param('versionId', ParseIntPipe) versionId: number,

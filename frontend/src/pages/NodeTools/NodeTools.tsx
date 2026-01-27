@@ -11,6 +11,7 @@ import type {
   ModelSpecificConfig,
   DoubaoSeedreamConfig,
   SoraVideoConfig,
+  GeminiImageConfig,
 } from '@shared/types/node-tool.types';
 import { IMAGE_ASPECT_RATIOS } from '@shared/types/node-tool.types';
 import type { PromptTemplateVersion } from '@shared/types/prompt.types';
@@ -34,8 +35,6 @@ const VARIABLE_TYPES: WorkflowValueType[] = [
   'list<asset_ref>',
   'list<asset_file>',
 ];
-
-const MAX_NANO_BANANA_IMAGES = 3;
 
 const isImageUrl = (value?: string) => {
   if (!value) return false;
@@ -83,10 +82,16 @@ const isDoubaoSeedreamModel = (model?: string) => {
   return key.includes('doubaoseedream') || key.includes('seedream');
 };
 
+const isGeminiImageModel = (model?: string) => {
+  if (!model) return false;
+  const key = model.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return key === 'gemini3proimagepreview' || key === 'gemini3proimage';
+};
+
 const isSoraModel = (model?: string) => {
   if (!model) return false;
   const key = model.toLowerCase().replace(/[^a-z0-9]/g, '');
-  return key === 'sora2' || key === 'sora2pro';
+  return key === 'sora' || key === 'sora2' || key === 'sora2pro' || key === 'veo31';
 };
 
 const emptyForm: ToolForm = {
@@ -143,28 +148,18 @@ export const NodeTools = () => {
     return modelOptions.find((option) => option.model === form.model)?.type || ProviderType.LLM;
   }, [form.model, modelOptions]);
 
-  const isNanoBananaModel = useMemo(() => {
-    if (!form.model) return false;
-    const key = form.model.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return key === 'nanobanana';
-  }, [form.model]);
-
-  const isJimengVideoModel = useMemo(() => {
-    if (!form.model) return false;
-    const key = form.model.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return key.includes('jimengvideo') || key === 'jimengvideo30';
-  }, [form.model]);
-
   const seedreamConfig = useMemo(() => (form.modelConfig || {}) as DoubaoSeedreamConfig, [form.modelConfig]);
   const soraConfig = useMemo(() => (form.modelConfig || {}) as SoraVideoConfig, [form.modelConfig]);
+  const geminiConfig = useMemo(() => (form.modelConfig || {}) as GeminiImageConfig, [form.modelConfig]);
 
-  // Show aspect ratio for nano-banana and jimeng-video models
-  const showAspectRatio = isNanoBananaModel || isJimengVideoModel;
+  // Aspect ratio selector not needed after removing jimeng video
+  const showAspectRatio = false;
 
   const supportsAssetInput =
     selectedProviderType === ProviderType.IMAGE ||
     selectedProviderType === ProviderType.VIDEO ||
-    isSoraModel(form.model);
+    isSoraModel(form.model) ||
+    isGeminiImageModel(form.model);
 
   const previewImages = useMemo(() => {
     if (!testResult) return [];
@@ -271,7 +266,7 @@ export const NodeTools = () => {
         ...prev,
         inputs: [
           ...prev.inputs,
-          { key: 'input_reference', name: '参考图', type: 'asset_file' as WorkflowValueType, required: true },
+          { key: 'input_reference', name: '参考图', type: 'asset_file' as WorkflowValueType, required: false },
         ],
       };
     });
@@ -617,7 +612,7 @@ export const NodeTools = () => {
             )}
             {showAspectRatio && !isDoubaoSeedreamModel(form.model) && (
               <div className={styles.modelOptions}>
-                <label>{isJimengVideoModel ? '生成视频比例' : '生成图片比例'}</label>
+                <label>生成媒体比例</label>
                 <select
                   value={form.imageAspectRatio || ''}
                   onChange={(event) => setForm({ ...form, imageAspectRatio: event.target.value || undefined })}
@@ -725,6 +720,54 @@ export const NodeTools = () => {
                   💡 参考图：添加类型为 <code>asset_ref</code> 或 <code>list&lt;asset_ref&gt;</code> 的输入变量，
                   将自动作为参考图传入 image 参数
                 </p>
+              </div>
+            )}
+            {/* Gemini Image 模型配置 */}
+            {isGeminiImageModel(form.model) && (
+              <div className={styles.modelOptions}>
+                <h4>Gemini 图片参数</h4>
+                <label>
+                  输出比例 (aspectRatio)
+                  <input
+                    type="text"
+                    placeholder="如 16:9"
+                    value={geminiConfig?.imageConfig?.aspectRatio || ''}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        modelConfig: {
+                          ...geminiConfig,
+                          imageConfig: {
+                            ...(geminiConfig?.imageConfig || {}),
+                            aspectRatio: e.target.value || undefined,
+                            imageSize: geminiConfig?.imageConfig?.imageSize,
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  输出尺寸 (imageSize)
+                  <input
+                    type="text"
+                    placeholder="如 4K / 2K / 1024x1024"
+                    value={geminiConfig?.imageConfig?.imageSize || ''}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        modelConfig: {
+                          ...geminiConfig,
+                          imageConfig: {
+                            ...(geminiConfig?.imageConfig || {}),
+                            imageSize: e.target.value || undefined,
+                            aspectRatio: geminiConfig?.imageConfig?.aspectRatio,
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
               </div>
             )}
             {isSoraModel(form.model) && (
@@ -892,13 +935,9 @@ export const NodeTools = () => {
                       onChange={(event) =>
                         setTestFiles((prev) => {
                           const fileList = event.target.files ? Array.from(event.target.files) : [];
-                          const limited =
-                            isNanoBananaModel && isAssetRefListType(input.type)
-                              ? fileList.slice(0, MAX_NANO_BANANA_IMAGES)
-                              : fileList;
                           return {
                             ...prev,
-                            [input.key]: limited,
+                            [input.key]: fileList,
                           };
                         })
                       }
@@ -907,9 +946,6 @@ export const NodeTools = () => {
                       <div className={styles.fileHint}>
                         已选择: {testFiles[input.key].map((file) => file.name).join(', ')}
                       </div>
-                    )}
-                    {isNanoBananaModel && isAssetRefListType(input.type) && (
-                      <div className={styles.fileHint}>最多支持 {MAX_NANO_BANANA_IMAGES} 张图片</div>
                     )}
                   </>
                 ) : (

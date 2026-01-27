@@ -155,14 +155,9 @@ export class AssetService {
   /**
    * 硬删除资产（管理员 + 确认token）
    */
-  async hardDelete(id: number, confirmToken: string | undefined, user: User): Promise<void> {
+  async hardDelete(id: number, user: User): Promise<void> {
     if (user.role !== UserRole.ADMIN) {
       throw new ForbiddenException('Only admins can hard delete assets');
-    }
-
-    const requiredToken = this.configService.get<string>('ASSET_HARD_DELETE_TOKEN', 'HARD_DELETE');
-    if (!confirmToken || confirmToken !== requiredToken) {
-      throw new BadRequestException('Invalid hard delete confirmation token');
     }
 
     const asset = await this.assetRepository.findOne({ where: { id } });
@@ -205,14 +200,9 @@ export class AssetService {
   /**
    * 批量永久删除资产
    */
-  async batchHardDelete(ids: number[], confirmToken: string | undefined, user: User): Promise<number> {
+  async batchHardDelete(ids: number[], user: User): Promise<number> {
     if (user.role !== UserRole.ADMIN) {
       throw new ForbiddenException('Only admins can hard delete assets');
-    }
-
-    const requiredToken = this.configService.get<string>('ASSET_HARD_DELETE_TOKEN', 'HARD_DELETE');
-    if (!confirmToken || confirmToken !== requiredToken) {
-      throw new BadRequestException('Invalid hard delete confirmation token');
     }
 
     let deleted = 0;
@@ -226,6 +216,34 @@ export class AssetService {
       }
     }
     return deleted;
+  }
+
+  /**
+   * 批量放入垃圾桶
+   */
+  async batchTrash(ids: number[], user: User): Promise<number> {
+    let trashed = 0;
+    for (const id of ids) {
+      const asset = await this.assetRepository
+        .createQueryBuilder('asset')
+        .leftJoinAndSelect('asset.task', 'task')
+        .leftJoinAndSelect('asset.space', 'space')
+        .where('asset.id = :id', { id })
+        .getOne();
+
+      if (!asset) continue;
+
+      const ownerId = asset.task?.userId ?? asset.space?.userId;
+      if (user.role !== UserRole.ADMIN && ownerId !== user.id) {
+        continue;
+      }
+
+      if (asset.status !== AssetStatus.TRASHED) {
+        await this.trashService.trashAsset(asset);
+        trashed++;
+      }
+    }
+    return trashed;
   }
 
   /**

@@ -12,4 +12,5 @@ export * as assetService from './asset.service';
 export * as assetSpaceService from './asset-space.service';
 export * as adminService from './admin.service';
 export * as nodeToolService from './node-tool.service';
+export * as storyboardService from './storyboard.service';
 export { default as api } from './api';

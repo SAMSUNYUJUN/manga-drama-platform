@@ -10,12 +10,10 @@ import { Repository } from 'typeorm';
 import { ProviderConfig, GlobalConfig } from '../database/entities';
 import { ProviderType } from '@shared/constants';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
-import { JimengVideoProvider } from './providers/jimeng-video.provider';
 import { SoraVideoProvider } from './providers/sora-video.provider';
 import { InputAssetFile } from './types';
 import { imageSize } from 'image-size';
 import axios from 'axios';
-import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
 import * as https from 'https';
@@ -110,14 +108,8 @@ export class AiOrchestratorService {
     inputImages?: string[],
     options?: { 
       imageAspectRatio?: string;
-      modelConfig?: {
-        size?: string;
-        sequential_image_generation?: 'auto' | 'disabled';
-        max_images?: number;
-        watermark?: boolean;
-        stream?: boolean;
-        response_format?: 'url' | 'b64_json';
-      };
+      modelConfig?: Record<string, any>;
+      assetFiles?: InputAssetFile[];
     },
   ): Promise<MediaResult[]> {
     console.log('[AiOrchestratorService] generateImage START', {
@@ -134,23 +126,17 @@ export class AiOrchestratorService {
     if (this.isDoubaoSeedreamModel(modelOverride)) {
       return await this.generateImageWithDoubaoSeedream(prompt, modelOverride!, inputImages, options);
     }
+
+    // Check if this is Gemini image model
+    if (this.isGeminiImageModel(modelOverride)) {
+      return await this.generateImageWithGemini(prompt, modelOverride!, inputImages, options);
+    }
     
     console.log('[AiOrchestratorService] Getting provider...');
     const { provider, model } = await this.getProvider(ProviderType.IMAGE, modelOverride);
     console.log('[AiOrchestratorService] Building multimodal content...');
     const content = this.buildMultimodalContent(prompt, inputImages);
-    
-    // Build messages array with optional system message for aspect ratio
-    const messages: Array<{ role: 'system' | 'user'; content: any }> = [];
-    const aspectRatio = options?.imageAspectRatio || '16:9';
-    if (this.isNanoBananaModel(model)) {
-      // Add system message with imageConfig for nano-banana
-      messages.push({
-        role: 'system',
-        content: JSON.stringify({ imageConfig: { aspectRatio } }),
-      });
-    }
-    messages.push({ role: 'user', content });
+    const messages: Array<{ role: 'system' | 'user'; content: any }> = [{ role: 'user', content }];
     
     console.log('[AiOrchestratorService] Making API request...');
     const response = await this.requestWithModelFallback(provider, model, {
@@ -180,22 +166,18 @@ export class AiOrchestratorService {
     if (this.aiMode === 'mock') {
       return [this.mockVideo()];
     }
-    
-    const model = modelOverride || 'jimeng-video-3.0';
+
+    const model = modelOverride || 'sora';
+    const providerConfig = await this.findProviderConfigByModel(model, ProviderType.VIDEO);
 
     // Handle sora async video models
-    if (this.isSoraModel(model)) {
+    if (this.isSoraModel(model) || this.isSoraBaseUrl(providerConfig?.baseUrl)) {
       return await this.generateVideoWithSora(prompt, model, inputImages, {
         modelConfig: options?.modelConfig,
         assetFiles: options?.assetFiles,
         clientJobId: options?.clientJobId,
         onProgress: options?.onProgress,
-      });
-    }
-    
-    // Check if this is jimeng-video model
-    if (this.isJimengVideoModel(model)) {
-      return await this.generateVideoWithJimeng(prompt, inputImages, options?.imageAspectRatio);
+      }, providerConfig);
     }
     
     // Fallback to OpenAI-compatible provider
@@ -220,8 +202,11 @@ export class AiOrchestratorService {
       clientJobId?: string;
       onProgress?: (payload: { taskId?: string; status: string; progress?: number; error?: string }) => void;
     },
+    providerConfig?: ProviderConfig | null,
   ): Promise<MediaResult[]> {
-    const providerConfig = await this.findProviderConfigByModel(model, ProviderType.VIDEO);
+    if (!providerConfig) {
+      providerConfig = await this.findProviderConfigByModel(model, ProviderType.VIDEO);
+    }
     if (!providerConfig?.baseUrl || !providerConfig?.apiKey) {
       throw new BadRequestException('Sora 视频提供商未配置，请先在 /admin/providers 中配置 baseUrl 与 apiKey');
     }
@@ -235,7 +220,7 @@ export class AiOrchestratorService {
       baseUrl: providerConfig.baseUrl,
       apiKey: providerConfig.apiKey,
       timeoutMs: providerConfig.timeoutMs || 60000,
-      pollIntervalMs: 3000, // Poll every few seconds
+      pollIntervalMs: 5000, // Poll every few seconds
       maxPollAttempts: providerConfig.timeoutMs ? Math.max(60, Math.floor(providerConfig.timeoutMs / 3000)) : 200,
     });
 
@@ -258,106 +243,7 @@ export class AiOrchestratorService {
     ];
   }
 
-  private async generateVideoWithJimeng(
-    prompt: string,
-    inputImages?: string[],
-    aspectRatio?: string,
-  ): Promise<MediaResult[]> {
-    // Get jimeng video provider config from database
-    const providerConfig = await this.providerRepository.findOne({
-      where: { type: ProviderType.VIDEO, enabled: true },
-      order: { updatedAt: 'DESC' },
-    });
-    
-    if (!providerConfig?.baseUrl || !providerConfig?.apiKey) {
-      throw new BadRequestException('Video provider not configured. Please configure it at /admin/providers');
-    }
-    
-    // Get provider settings from database
-    const baseUrl = providerConfig.baseUrl;
-    const apiKey = providerConfig.apiKey;
-    
-    const jimengProvider = new JimengVideoProvider({
-      baseUrl,
-      apiKey,
-      timeoutMs: 60000,
-      pollIntervalMs: 5000,
-      maxPollAttempts: 120, // 10 minutes max
-    });
-    
-    // 处理本地 URL - 转换为 data URI
-    const processedImages = await this.prepareImagesForJimeng(inputImages || []);
-    
-    const result = await jimengProvider.generateVideo(
-      prompt,
-      aspectRatio || '16:9',
-      processedImages,
-    );
-    
-    return [{ url: result.videoUrl, mimeType: 'video/mp4' }];
-  }
-
-  /**
-   * 准备即梦视频 API 所需的图片
-   * 本地 URL 转换为 data URI（即梦 API 支持 base64 格式）
-   */
-  private async prepareImagesForJimeng(urls: string[]): Promise<string[]> {
-    const results: string[] = [];
-    
-    for (const url of urls) {
-      if (this.isLocalUrl(url)) {
-        // 将本地 URL 转换为 data URI
-        const dataUri = await this.localUrlToDataUri(url);
-        results.push(dataUri);
-      } else if (url.startsWith('data:')) {
-        // 已经是 data URI
-        results.push(url);
-      } else {
-        // 外部可访问的 URL，直接使用
-        results.push(url);
-      }
-    }
-    
-    return results;
-  }
-
-  private isLocalUrl(url: string): boolean {
-    return url.includes('localhost') || 
-           url.includes('127.0.0.1') || 
-           url.startsWith('/uploads/');
-  }
-
-  private async localUrlToDataUri(url: string): Promise<string> {
-    // 从 URL 中提取本地文件路径
-    let filePath: string;
-    
-    if (url.includes('/uploads/')) {
-      // URL 格式: http://localhost:3001/uploads/... 或 /uploads/...
-      const uploadsIndex = url.indexOf('/uploads/');
-      const relativePath = url.substring(uploadsIndex);
-      filePath = path.join(process.cwd(), '..', 'storage', relativePath);
-    } else {
-      throw new BadRequestException(`无法处理的本地 URL: ${url}`);
-    }
-    
-    // 检查文件是否存在
-    if (!fs.existsSync(filePath)) {
-      throw new BadRequestException(`文件不存在: ${filePath}`);
-    }
-    
-    // 读取文件并转换为 base64
-    const buffer = fs.readFileSync(filePath);
-    const ext = path.extname(filePath).toLowerCase();
-    let mimeType = 'image/jpeg';
-    if (ext === '.png') mimeType = 'image/png';
-    else if (ext === '.gif') mimeType = 'image/gif';
-    else if (ext === '.webp') mimeType = 'image/webp';
-    
-    const base64 = buffer.toString('base64');
-    return `data:${mimeType};base64,${base64}`;
-  }
-
-  private async resolveSoraInputFile(assetFiles?: InputAssetFile[], inputImages?: string[]): Promise<InputAssetFile> {
+  private async resolveSoraInputFile(assetFiles?: InputAssetFile[], inputImages?: string[]): Promise<InputAssetFile | undefined> {
     if (assetFiles && assetFiles.length) {
       const file = assetFiles[0];
       const measured = this.measureImage(file.buffer);
@@ -366,7 +252,8 @@ export class AiOrchestratorService {
     if (inputImages && inputImages.length) {
       return await this.downloadInputImageAsFile(inputImages[0]);
     }
-    throw new BadRequestException('Sora 视频模型需要至少一张参考图');
+    // 文生视频时没有参考图也应允许
+    return undefined;
   }
 
   private async downloadInputImageAsFile(url: string): Promise<InputAssetFile> {
@@ -485,13 +372,13 @@ export class AiOrchestratorService {
   private isSoraModel(model?: string): boolean {
     if (!model) return false;
     const key = this.normalizeModelKey(model);
-    return key === 'sora2' || key === 'sora2pro';
+    return key === 'sora' || key === 'sora2' || key === 'sora2pro' || key === 'veo31';
   }
 
-  private isJimengVideoModel(model?: string): boolean {
-    if (!model) return false;
-    const key = this.normalizeModelKey(model);
-    return key.includes('jimengvideo') || key === 'jimengvideo30';
+  private isSoraBaseUrl(baseUrl?: string): boolean {
+    if (!baseUrl) return false;
+    const normalized = baseUrl.toLowerCase().replace(/\/$/, '');
+    return normalized === 'https://api.laozhang.ai/v1/videos';
   }
 
   async resolveProviderType(model?: string): Promise<ProviderType> {
@@ -568,8 +455,8 @@ export class AiOrchestratorService {
   private getDefaultModel(type: ProviderType, globalConfig?: GlobalConfig | null): string {
     // All model settings are managed via admin UI at /admin/providers
     if (type === ProviderType.LLM) return globalConfig?.defaultLlmModel || 'deepseek-chat';
-    if (type === ProviderType.IMAGE) return globalConfig?.defaultImageModel || 'nano-banana';
-    return globalConfig?.defaultVideoModel || 'jimeng-video-3.0';
+    if (type === ProviderType.IMAGE) return globalConfig?.defaultImageModel || 'image-generation';
+    return globalConfig?.defaultVideoModel || 'sora';
   }
 
   private getMaxTokens(): number {
@@ -610,12 +497,6 @@ export class AiOrchestratorService {
   }
 
   private getModelCandidates(model: string): string[] {
-    const key = this.normalizeModelKey(model);
-    if (key === 'nanobanana') {
-      const variants = ['nano-banana', 'nanobanana'];
-      const unique = new Set([model, ...variants]);
-      return Array.from(unique);
-    }
     return [model];
   }
 
@@ -626,15 +507,13 @@ export class AiOrchestratorService {
 
   private normalizeModelName(model?: string): string {
     if (!model) return '';
-    const key = this.normalizeModelKey(model);
-    if (key === 'nanobanana') return 'nano-banana';
     return model.trim();
   }
 
-  private isNanoBananaModel(model?: string): boolean {
+  private isGeminiImageModel(model?: string): boolean {
     if (!model) return false;
     const key = this.normalizeModelKey(model);
-    return key === 'nanobanana';
+    return key === 'gemini3proimagepreview' || key === 'gemini3proimage';
   }
 
   private isDoubaoSeedreamModel(model?: string): boolean {
@@ -642,6 +521,151 @@ export class AiOrchestratorService {
     const key = this.normalizeModelKey(model);
     return key.includes('doubaoseedream') || key.includes('seedream');
   }
+
+  /**
+   * 使用 Gemini 3 Pro Image Preview 模型生成图片
+   * 支持：纯文本生图、文+图生图（URL 优先，失败回退为 base64）
+   */
+  private async generateImageWithGemini(
+    prompt: string,
+    model: string,
+    inputImages?: string[],
+    options?: {
+      imageAspectRatio?: string;
+      modelConfig?: Record<string, any>;
+      assetFiles?: InputAssetFile[];
+    },
+  ): Promise<MediaResult[]> {
+    console.log('[AiOrchestratorService] generateImageWithGemini START', {
+      model,
+      prompt: prompt.substring(0, 100),
+      inputImagesCount: inputImages?.length,
+      modelConfig: options?.modelConfig,
+    });
+
+    const providerConfig = await this.findProviderConfigByModel(model, ProviderType.IMAGE);
+    if (!providerConfig?.baseUrl || !providerConfig?.apiKey) {
+      throw new BadRequestException('Gemini 图像模型未配置，请在 /admin/providers 中设置 baseUrl 与 apiKey');
+    }
+
+    const baseUrl = providerConfig.baseUrl.replace(/\/$/, '');
+    const endpoint = baseUrl.includes('/models/')
+      ? baseUrl
+      : `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
+
+    // 选择图片来源：优先用户上传文件，其次输入 URL
+    const imageUrl = inputImages?.[0];
+    const inlineFile: InputAssetFile | undefined =
+      options?.assetFiles?.[0] ||
+      (imageUrl && imageUrl.startsWith('data:') ? await this.downloadInputImageAsFile(imageUrl) : undefined);
+
+    // 构建请求并发送；如 fileData 失败再回退 inline_data
+    const aspectRatio =
+      options?.modelConfig?.imageConfig?.aspectRatio ||
+      options?.imageAspectRatio ||
+      '16:9';
+    const imageSize = options?.modelConfig?.imageConfig?.imageSize || '4K';
+
+    const sendRequest = async (useInline: boolean): Promise<MediaResult[]> => {
+      const payload: any = {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              ...(useInline && inlineFile
+                ? [
+                    {
+                      inline_data: {
+                        mime_type: inlineFile.mimeType || 'image/png',
+                        data: inlineFile.buffer.toString('base64'),
+                      },
+                    },
+                  ]
+                : !useInline && imageUrl
+                ? [
+                    {
+                      fileData: {
+                        fileUri: imageUrl,
+                        mimeType: this.guessMimeType('image', path.extname(imageUrl).replace('.', '')),
+                      },
+                    },
+                  ]
+                : []),
+              { text: prompt },
+            ],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ['IMAGE'],
+          imageConfig: {
+            aspectRatio,
+            imageSize,
+          },
+        },
+      };
+
+      const response = await axios.post(endpoint, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': providerConfig.apiKey,
+        },
+        timeout: providerConfig.timeoutMs || 120000,
+        httpsAgent: new https.Agent({ family: 4, timeout: providerConfig.timeoutMs || 120000 }),
+      });
+
+      const media = this.extractGeminiMedia(response.data);
+      if (!media.length) {
+        throw new BadRequestException('Gemini 返回数据中未找到图片');
+      }
+      return media;
+    };
+
+    // 优先走 URL；失败后尝试 inline_data
+    if (imageUrl && !inlineFile) {
+      try {
+        return await sendRequest(false);
+      } catch (error) {
+        console.warn('[AiOrchestratorService] Gemini fileData failed, retry with inline_data', error?.message);
+        const downloaded = await this.downloadInputImageAsFile(imageUrl);
+        const inlineFromUrl: InputAssetFile = {
+          ...downloaded,
+          mimeType: downloaded.mimeType || 'image/png',
+        };
+        (options ??= {}).assetFiles = [inlineFromUrl];
+        return await this.generateImageWithGemini(prompt, model, inputImages, options);
+      }
+    }
+
+    // 直接使用 inline_data（包含本地上传或 data URI）
+    if (inlineFile) {
+      return await sendRequest(true);
+    }
+
+    // 纯文生图
+    return await sendRequest(false);
+  }
+
+  private extractGeminiMedia(response: any): MediaResult[] {
+    const results: MediaResult[] = [];
+    const candidates = response?.candidates || [];
+    candidates.forEach((candidate: any) => {
+      const parts = candidate?.content?.parts || [];
+      parts.forEach((part: any) => {
+        const inlineData = part?.inlineData || part?.inline_data;
+        if (inlineData?.data) {
+          const mime = inlineData?.mimeType || inlineData?.mime_type || 'image/png';
+          results.push({ data: Buffer.from(inlineData.data, 'base64'), mimeType: mime });
+          return;
+        }
+        const fileData = part?.fileData || part?.file_data;
+        if (fileData?.fileUri) {
+          results.push({ url: fileData.fileUri });
+        }
+      });
+    });
+    return results;
+  }
+
 
   /**
    * 使用 doubao-seedream 模型生成图片
@@ -670,11 +694,13 @@ export class AiOrchestratorService {
       options,
     });
 
-    // Get provider config from database
-    const providerConfig = await this.providerRepository.findOne({
-      where: { type: ProviderType.IMAGE, enabled: true },
-      order: { updatedAt: 'DESC' },
-    });
+    // Prefer provider matched by model; fallback to latest IMAGE provider
+    let providerConfig =
+      (await this.findProviderConfigByModel(model, ProviderType.IMAGE)) ||
+      (await this.providerRepository.findOne({
+        where: { type: ProviderType.IMAGE, enabled: true },
+        order: { updatedAt: 'DESC' },
+      }));
 
     if (!providerConfig?.baseUrl || !providerConfig?.apiKey) {
       throw new BadRequestException('Image provider not configured. Please configure it at /admin/providers');
@@ -783,20 +809,6 @@ export class AiOrchestratorService {
     }
 
     if (typeof content === 'string') {
-      // Handle nano-banana special marker: |>![g2pimage](url)
-      // This must be checked before general markdown extraction
-      const nanoBananaMarkerRegex = /\|>!\[g2pimage\]\(([^)]+)\)/g;
-      const nanoBananaMatches = Array.from(content.matchAll(nanoBananaMarkerRegex));
-      if (nanoBananaMatches.length > 0) {
-        nanoBananaMatches.forEach((match) => {
-          const url = match[1];
-          if (url && url.startsWith('http')) {
-            results.push({ url });
-          }
-        });
-        if (results.length > 0) return results;
-      }
-
       // Extract Markdown image links: ![alt](url)
       const markdownImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
       const markdownMatches = Array.from(content.matchAll(markdownImageRegex));
@@ -808,20 +820,6 @@ export class AiOrchestratorService {
           }
         });
         if (results.length > 0) return results;
-      }
-
-      // Handle nano-banana base64 data format: "|>g2pimage" followed by base64
-      const markerMatch = content.match(/\|>g2pimage([A-Za-z0-9+/=\s]+)/);
-      if (markerMatch) {
-        const base64Data = markerMatch[1].replace(/\s+/g, ''); // Remove whitespace
-        if (base64Data.length > 100) { // Sanity check for valid base64
-          try {
-            results.push({ data: Buffer.from(base64Data, 'base64'), mimeType: 'image/png' });
-            return results;
-          } catch (error) {
-            this.logger.warn('Failed to decode nano-banana image data', error);
-          }
-        }
       }
 
       const jsonObject = this.tryParseJson(content);
@@ -871,7 +869,7 @@ export class AiOrchestratorService {
       // Check if URL contains common media hosting patterns or paths
       if (url.includes('/png/') || url.includes('/jpg/') || url.includes('/jpeg/') || 
           url.includes('/image/') || url.includes('/video/') || url.includes('/mp4/') ||
-          url.includes('cloudflare') || url.includes('nananobanana')) {
+          url.includes('cloudflare')) {
         return url;
       }
     }

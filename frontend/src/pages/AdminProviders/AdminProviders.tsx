@@ -159,7 +159,7 @@ export const AdminProviders = () => {
     <div className={styles.page}>
       <header className={styles.header}>
         <h1>🤖 模型管理</h1>
-        <p>注册和管理 AI 模型（DeepSeek、Nano-Banana 等）</p>
+        <p>注册和管理 AI 模型（DeepSeek、图像/视频生成等）</p>
       </header>
 
       <section className={styles.panel}>
@@ -169,7 +169,7 @@ export const AdminProviders = () => {
           <div className={styles.formRow}>
             <label>模型名称</label>
             <input
-              placeholder="例如: deepseek-chat, nano-banana"
+              placeholder="例如: deepseek-chat, gpt-4o-mini"
               value={form.model}
               onChange={(event) => setForm({ ...form, model: event.target.value })}
             />
@@ -181,8 +181,8 @@ export const AdminProviders = () => {
               onChange={(event) => setForm({ ...form, type: event.target.value as ProviderType })}
             >
               <option value={ProviderType.LLM}>🤖 LLM (文本生成，如 DeepSeek)</option>
-              <option value={ProviderType.IMAGE}>🎨 Image (图像生成，如 Nano-Banana)</option>
-              <option value={ProviderType.VIDEO}>🎬 Video (视频生成，如 Jimeng-Video-3.0)</option>
+              <option value={ProviderType.IMAGE}>🎨 Image (图像生成，如 Doubao-Seedream)</option>
+              <option value={ProviderType.VIDEO}>🎬 Video (视频生成，如 Sora 系列)</option>
             </select>
           </div>
           <div className={styles.formRow}>
@@ -340,13 +340,14 @@ export const AdminProviders = () => {
         <h3>💡 使用说明</h3>
         <div className={styles.help}>
           <p><strong>LLM 模型</strong>（如 DeepSeek）：用于文本生成任务，支持 OpenAI 兼容的 API 格式</p>
-          <p><strong>Image 模型</strong>（如 Nano-Banana）：用于图像生成任务，支持 text-to-image 和 image-to-image</p>
-          <p><strong>Video 模型</strong>（如 Jimeng-Video-3.0）：用于视频生成任务，支持 text-to-video 和 image-to-video</p>
+          <p><strong>Image 模型</strong>（如 Doubao-Seedream）：用于图像生成任务，支持 text-to-image 和 image-to-image</p>
+          <p><strong>Video 模型</strong>（如 Sora / VEO）：用于视频生成任务，支持 text-to-video 和 image-to-video</p>
           <hr />
           <p><strong>常用配置示例：</strong></p>
           <ul>
             <li>DeepSeek: Base URL = <code>https://api.deepseek.com/v1</code></li>
-            <li>Nano-Banana / Jimeng-Video: Base URL = <code>https://api.qingyuntop.top</code></li>
+            <li>Doubao-Seedream: Base URL = <code>https://ark.cn-beijing.volces.com/api/v3</code></li>
+            <li>Sora / VEO: Base URL 例如 <code>https://api.laozhang.ai/v1/videos</code></li>
           </ul>
         </div>
       </section>

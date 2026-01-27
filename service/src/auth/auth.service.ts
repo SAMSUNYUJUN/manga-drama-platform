@@ -75,7 +75,9 @@ export class AuthService {
     const { username, password } = loginDto;
 
     // 查找用户
-    const user = await this.userRepository.findOne({ where: { username } });
+    const user = await this.userRepository.findOne({
+      where: [{ username }, { email: username }],
+    });
 
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');

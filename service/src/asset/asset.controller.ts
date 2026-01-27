@@ -67,10 +67,9 @@ export class AssetController {
   @Delete(':id')
   async remove(
     @Param('id', ParseIntPipe) id: number,
-    @Query('confirmToken') confirmToken: string | undefined,
     @CurrentUser() user: User,
   ): Promise<ApiResponse<null>> {
-    await this.assetService.hardDelete(id, confirmToken, user);
+    await this.assetService.hardDelete(id, user);
     return {
       success: true,
       data: null,
@@ -135,14 +134,31 @@ export class AssetController {
    */
   @Post('batch-delete')
   async batchDelete(
-    @Body() body: { ids: number[]; confirmToken: string },
+    @Body() body: { ids: number[] },
     @CurrentUser() user: User,
   ): Promise<ApiResponse<{ deleted: number }>> {
-    const deleted = await this.assetService.batchHardDelete(body.ids, body.confirmToken, user);
+    const deleted = await this.assetService.batchHardDelete(body.ids, user);
     return {
       success: true,
       data: { deleted },
       message: `${deleted} assets hard deleted successfully`,
+    };
+  }
+
+  /**
+   * 批量放入垃圾桶
+   * POST /api/assets/batch-trash
+   */
+  @Post('batch-trash')
+  async batchTrash(
+    @Body() body: { ids: number[] },
+    @CurrentUser() user: User,
+  ): Promise<ApiResponse<{ trashed: number }>> {
+    const trashed = await this.assetService.batchTrash(body.ids, user);
+    return {
+      success: true,
+      data: { trashed },
+      message: `${trashed} assets trashed successfully`,
     };
   }
 

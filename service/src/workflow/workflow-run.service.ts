@@ -903,7 +903,7 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
           if (requiresAssetInput && !inputAssetUrls.length) {
             throw new BadRequestException('缺少图片输入');
           }
-          const inputImages = await this.prepareInputImagesForModel(inputAssetUrls, model, { forceDataUri: true });
+          const inputImages = await this.prepareInputImagesForModel(inputAssetUrls, model, { forceDataUri: false });
           const media =
             providerType === ProviderType.IMAGE
               ? await this.aiService.generateImage(rendered.rendered, model, inputImages, { imageAspectRatio, modelConfig })
@@ -2387,11 +2387,8 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
     options?: { forceDataUri?: boolean },
   ) {
     if (!urls.length) return urls;
-    const useDataUri = options?.forceDataUri || this.isNanoBananaModel(model);
+    const useDataUri = options?.forceDataUri;
     if (!useDataUri) return urls;
-    if (this.isNanoBananaModel(model) && urls.length > 3) {
-      throw new BadRequestException('最多支持3张图片');
-    }
     const dataUris = await Promise.all(urls.map((url) => this.toImageDataUri(url)));
     return dataUris;
   }
@@ -2410,12 +2407,6 @@ export class WorkflowRunService implements OnModuleInit, OnModuleDestroy {
       .filter(Boolean)
       .join(' ');
     return details ? `${message} (${details})` : message;
-  }
-
-  private isNanoBananaModel(model?: string) {
-    if (!model) return false;
-    const key = model.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return key === 'nanobanana';
   }
 
   private async toImageDataUri(url: string) {

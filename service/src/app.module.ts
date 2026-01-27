@@ -18,6 +18,7 @@ import { WorkflowModule } from './workflow/workflow.module';
 import { SeedModule } from './database/seed/seed.module';
 import { NodeToolModule } from './node-tool/node-tool.module';
 import { WorkbenchModule } from './workbench/workbench.module';
+import { StoryboardModule } from './storyboard/storyboard.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { WorkbenchModule } from './workbench/workbench.module';
     NodeToolModule,
     WorkbenchModule,
     SeedModule,
+    StoryboardModule,
   ],
   controllers: [AppController],
   providers: [

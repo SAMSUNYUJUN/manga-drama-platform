@@ -14,6 +14,9 @@ import {
   WorkflowRun,
   ProviderConfig,
   GlobalConfig,
+  PromptTemplate,
+  PromptTemplateVersion,
+  NodeTool,
 } from '../entities';
 import { SeedService } from './seed.service';
 import { ConfigModule } from '@nestjs/config';
@@ -30,6 +33,9 @@ import { ConfigModule } from '@nestjs/config';
       WorkflowRun,
       ProviderConfig,
       GlobalConfig,
+      PromptTemplate,
+      PromptTemplateVersion,
+      NodeTool,
     ]),
   ],
   providers: [SeedService],

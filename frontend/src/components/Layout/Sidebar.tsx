@@ -18,6 +18,9 @@ export const Sidebar = () => {
         <NavLink to="/workbench" className={({ isActive }) => isActive ? styles.active : ''}>
           🎬 漫剧工作台
         </NavLink>
+        <NavLink to="/storyboard-gacha" className={({ isActive }) => isActive ? styles.active : ''}>
+          🎴 分镜抽卡
+        </NavLink>
         <NavLink to="/tasks" className={({ isActive }) => isActive ? styles.active : ''}>
           📋 任务列表
         </NavLink>

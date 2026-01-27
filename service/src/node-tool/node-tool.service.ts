@@ -167,7 +167,7 @@ export class NodeToolService {
     if (!files.length) {
       return await this.testToolConfig(payload, user);
     }
-    const useDataUri = this.isNanoBananaModel(payload.model) || this.isDoubaoSeedreamModel(payload.model);
+    const useDataUri = this.isDoubaoSeedreamModel(payload.model);
     const merged = await this.mergeInputsWithFiles(payload.inputs || {}, files, {
       useDataUri,
       maxImages: useDataUri ? 3 : undefined,
@@ -249,7 +249,7 @@ export class NodeToolService {
           rendered.rendered,
           payload.model,
           assetUrls,
-          { imageAspectRatio: payload.imageAspectRatio, modelConfig: payload.modelConfig },
+          { imageAspectRatio: payload.imageAspectRatio, modelConfig: payload.modelConfig, assetFiles: payload.assetFiles },
         );
         console.log('[NodeToolService] generateImage completed, results:', results.length);
         rawMediaResults = results;
@@ -471,16 +471,10 @@ export class NodeToolService {
     return /^(https?:\/\/|data:image\/|data:video\/)/i.test(value);
   }
 
-  private isNanoBananaModel(model?: string) {
-    if (!model) return false;
-    const key = model.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return key === 'nanobanana';
-  }
-
   private isSoraModel(model?: string) {
     if (!model) return false;
     const key = model.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return key === 'sora2' || key === 'sora2pro';
+    return key === 'sora' || key === 'sora2' || key === 'sora2pro' || key === 'veo31';
   }
 
   private toDataUri(file: any) {

@@ -51,9 +51,7 @@ export const Trash = () => {
   };
 
   const handleHardDelete = async (id: number) => {
-    const token = prompt('输入确认 token 以永久删除:');
-    if (!token) return;
-    await assetService.hardDeleteAsset(id, token);
+    await assetService.hardDeleteAsset(id);
     await loadAssets();
   };
 
@@ -65,9 +63,7 @@ export const Trash = () => {
 
   const handleBatchDelete = async () => {
     if (selectedIds.size === 0) return;
-    const token = prompt(`输入确认 token 以永久删除 ${selectedIds.size} 个资产:`);
-    if (!token) return;
-    await assetService.batchHardDeleteAssets(Array.from(selectedIds), token);
+    await assetService.batchHardDeleteAssets(Array.from(selectedIds));
     await loadAssets();
   };
 

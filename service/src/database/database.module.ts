@@ -6,7 +6,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { User, Task, TaskVersion, Asset, AssetSpace, WorkflowTemplate, WorkflowTemplateVersion, WorkflowRun, NodeRun, HumanReviewDecisionEntity, PromptTemplate, PromptTemplateVersion, ProviderConfig, GlobalConfig, TrashAsset, NodeTool } from './entities';
+import { User, Task, TaskVersion, Asset, AssetSpace, WorkflowTemplate, WorkflowTemplateVersion, WorkflowRun, NodeRun, HumanReviewDecisionEntity, PromptTemplate, PromptTemplateVersion, ProviderConfig, GlobalConfig, TrashAsset, NodeTool, StoryboardShot, StoryboardMessage } from './entities';
 import * as path from 'path';
 
 @Module({
@@ -33,6 +33,8 @@ import * as path from 'path';
           GlobalConfig,
           TrashAsset,
           NodeTool,
+          StoryboardShot,
+          StoryboardMessage,
         ],
         migrations: [path.join(__dirname, 'migrations/*{.ts,.js}')],
         migrationsRun: true,

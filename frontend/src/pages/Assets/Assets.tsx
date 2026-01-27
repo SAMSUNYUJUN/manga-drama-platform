@@ -28,6 +28,7 @@ export const Assets = () => {
   const [assetError, setAssetError] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const loadSpaces = async () => {
     try {
@@ -48,6 +49,7 @@ export const Assets = () => {
   const loadAssets = async (spaceId?: number | null, pageNum: number = 1) => {
     if (!spaceId) {
       setAssets([]);
+      setSelectedIds(new Set());
       return;
     }
     try {
@@ -56,6 +58,7 @@ export const Assets = () => {
       setAssets(data.items);
       setPage(data.page);
       setTotalPages(data.totalPages || 1);
+      setSelectedIds(new Set());
     } catch (error: any) {
       setAssets([]);
       setAssetError(error?.message || '资产加载失败');
@@ -124,6 +127,52 @@ export const Assets = () => {
       setIsUploading(false);
     }
   };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === assets.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(assets.map((a) => a.id)));
+    }
+  };
+
+  const handleBatchTrash = async () => {
+    if (!selectedIds.size) return;
+    try {
+      await assetService.batchTrashAssets(Array.from(selectedIds));
+      await loadAssets(selectedSpaceId);
+    } catch (error: any) {
+      setAssetError(error?.message || '批量放入垃圾桶失败');
+    }
+  };
+
+  const handleBatchDownload = async () => {
+    if (!selectedIds.size) return;
+    try {
+      for (const id of Array.from(selectedIds)) {
+        const data = await assetService.downloadAsset(id);
+        const a = document.createElement('a');
+        a.href = data.url;
+        a.download = '';
+        a.target = '_blank';
+        a.rel = 'noreferrer';
+        a.click();
+      }
+    } catch (error: any) {
+      setAssetError(error?.message || '批量下载失败');
+    }
+  };
+
+  const isAllSelected = assets.length > 0 && selectedIds.size === assets.length;
 
   return (
     <div className={styles.page}>
@@ -200,10 +249,40 @@ export const Assets = () => {
           </div>
 
           <div className={styles.list}>
+            {assets.length > 0 && (
+              <div className={styles.batchBar}>
+                <label className={styles.selectAll}>
+                  <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} />
+                  全选 ({selectedIds.size}/{assets.length})
+                </label>
+                <div className={styles.batchButtons}>
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    disabled={selectedIds.size === 0}
+                    onClick={handleBatchDownload}
+                  >
+                    批量下载
+                  </button>
+                  <button
+                    className="btn btn--outline btn--sm"
+                    disabled={selectedIds.size === 0}
+                    onClick={handleBatchTrash}
+                  >
+                    批量放入垃圾桶
+                  </button>
+                </div>
+              </div>
+            )}
             {assetError && <div className={styles.error}>{assetError}</div>}
             {assets.map((asset) => (
               <div key={asset.id} className={styles.item}>
-                <div>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(asset.id)}
+                  onChange={() => toggleSelect(asset.id)}
+                  className={styles.checkbox}
+                />
+                <div className={styles.info}>
                   <div className={styles.title}>{asset.filename}</div>
                   <div className={styles.meta}>{ASSET_TYPE_LABELS[asset.type] || asset.type}</div>
                 </div>

@@ -32,8 +32,16 @@ export interface SoraVideoConfig {
   seconds?: number;
 }
 
+/** Gemini 图片模型配置 */
+export interface GeminiImageConfig {
+  imageConfig?: {
+    aspectRatio?: string;
+    imageSize?: string;
+  };
+}
+
 /** 模型特定配置联合类型 */
-export type ModelSpecificConfig = DoubaoSeedreamConfig | SoraVideoConfig;
+export type ModelSpecificConfig = DoubaoSeedreamConfig | SoraVideoConfig | GeminiImageConfig;
 
 export interface NodeTool {
   id: number;

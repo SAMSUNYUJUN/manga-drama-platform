@@ -53,7 +53,7 @@ export class SoraVideoProvider {
     prompt: string;
     size: string;
     seconds: number;
-    input: InputAssetFile;
+    input?: InputAssetFile;
     jobId?: string;
     onProgress?: (payload: { taskId: string; status: string; progress?: number; error?: string }) => void;
   }): Promise<{ videoBuffer: Buffer; taskId: string; downloadUrl: string; mimeType?: string }> {
@@ -74,7 +74,7 @@ export class SoraVideoProvider {
     prompt: string;
     size: string;
     seconds: number;
-    input: InputAssetFile;
+    input?: InputAssetFile;
   }): Promise<CreateVideoResult> {
     const endpoint = this.buildEndpoint('/videos');
     console.log('[SoraVideoProvider] createVideoTask', {
@@ -90,11 +90,13 @@ export class SoraVideoProvider {
     form.append('prompt', params.prompt);
     form.append('size', params.size);
     form.append('seconds', String(params.seconds));
-    form.append('input_reference', params.input.buffer, {
-      filename: params.input.filename || 'input.png',
-      contentType: params.input.mimeType || 'image/png',
-      knownLength: params.input.size ?? params.input.buffer?.length,
-    });
+    if (params.input) {
+      form.append('input_reference', params.input.buffer, {
+        filename: params.input.filename || 'input.png',
+        contentType: params.input.mimeType || 'image/png',
+        knownLength: params.input.size ?? params.input.buffer?.length,
+      });
+    }
 
     const response = await axios.post<CreateVideoResult>(endpoint, form, {
       headers: {
@@ -111,6 +113,7 @@ export class SoraVideoProvider {
       throw new Error(`Sora create video failed: ${response.data ? JSON.stringify(response.data) : 'empty response'}`);
     }
 
+    console.log('[SoraVideoProvider] Created video task', response.data.id);
     return response.data;
   }
 

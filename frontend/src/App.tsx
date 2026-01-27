@@ -20,6 +20,7 @@ import { Trash } from './pages/Trash';
 import { AdminProviders } from './pages/AdminProviders';
 import { NodeTools } from './pages/NodeTools';
 import Workbench from './pages/Workbench';
+import { StoryboardGacha } from './pages/StoryboardGacha/StoryboardGacha';
 import './App.css';
 
 // 受保护的路由组件
@@ -185,6 +186,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Workbench />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/storyboard-gacha"
+            element={
+              <ProtectedRoute>
+                <StoryboardGacha />
               </ProtectedRoute>
             }
           />

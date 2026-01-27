@@ -42,14 +42,18 @@ export const getAssetTextContent = async (id: number): Promise<string> => {
   return response.data.data!.content;
 };
 
-export const hardDeleteAsset = async (id: number, confirmToken: string): Promise<void> => {
-  await api.delete(`/assets/${id}`, { params: { confirmToken } });
+export const hardDeleteAsset = async (id: number): Promise<void> => {
+  await api.delete(`/assets/${id}`);
 };
 
-export const batchHardDeleteAssets = async (ids: number[], confirmToken: string): Promise<void> => {
-  await api.post('/assets/batch-delete', { ids, confirmToken });
+export const batchHardDeleteAssets = async (ids: number[]): Promise<void> => {
+  await api.post('/assets/batch-delete', { ids });
 };
 
 export const batchRestoreAssets = async (ids: number[]): Promise<void> => {
   await api.post('/assets/batch-restore', { ids });
+};
+
+export const batchTrashAssets = async (ids: number[]): Promise<void> => {
+  await api.post('/assets/batch-trash', { ids });
 };

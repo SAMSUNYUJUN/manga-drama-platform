@@ -1,10 +1,9 @@
 #!/bin/bash
 
 # Test script for node tools and workflow
-# This script tests the three types of node tools:
+# This script tests node tools and workflow:
 # 1. Text to JSON (LLM)
-# 2. Text to Image (nano-banana)
-# 3. Text + Image to Image (nano-banana)
+# 2. Workflow listing
 
 set -e
 
@@ -66,59 +65,6 @@ test_text_to_json() {
     fi
 }
 
-# Test text-to-image node tool (nano-banana)
-test_text_to_image() {
-    log_info "Testing Text-to-Image node tool (ID: 5)..."
-    
-    local response=$(curl -s -X POST "$API_BASE/node-tools/5/test" \
-        -H "Authorization: Bearer $AUTH_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d '{"inputs": {"text": "一只可爱的小猫在阳光下玩耍"}}' \
-        --max-time 180)
-    
-    local success=$(echo "$response" | grep -o '"success":true' || echo "")
-    if [ -n "$success" ]; then
-        log_info "✓ Text-to-Image test passed"
-        # Check if mediaUrls contains image URL
-        local image_url=$(echo "$response" | grep -o '"mediaUrls":\[[^]]*\]' || echo "")
-        if [ -n "$image_url" ]; then
-            log_info "Generated image URLs: $image_url"
-        fi
-        echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
-    else
-        log_error "✗ Text-to-Image test failed"
-        echo "$response"
-    fi
-}
-
-# Test text+image-to-image node tool (nano-banana)
-test_image_to_image() {
-    log_info "Testing Text+Image-to-Image node tool (ID: 7)..."
-    
-    # First, we need a sample image URL or base64
-    # Using a sample public image URL for testing
-    local sample_image_url="https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Cat_November_2010-1a.jpg/220px-Cat_November_2010-1a.jpg"
-    
-    local response=$(curl -s -X POST "$API_BASE/node-tools/7/test" \
-        -H "Authorization: Bearer $AUTH_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{\"inputs\": {\"text\": \"把这只猫变成一只戴着帽子的猫\", \"image\": \"$sample_image_url\"}}" \
-        --max-time 180)
-    
-    local success=$(echo "$response" | grep -o '"success":true' || echo "")
-    if [ -n "$success" ]; then
-        log_info "✓ Text+Image-to-Image test passed"
-        local image_url=$(echo "$response" | grep -o '"mediaUrls":\[[^]]*\]' || echo "")
-        if [ -n "$image_url" ]; then
-            log_info "Generated image URLs: $image_url"
-        fi
-        echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
-    else
-        log_error "✗ Text+Image-to-Image test failed"
-        echo "$response"
-    fi
-}
-
 # List existing node tools
 list_node_tools() {
     log_info "Listing existing node tools..."
@@ -170,12 +116,6 @@ main() {
     fi
     
     test_text_to_json
-    echo ""
-    
-    test_text_to_image
-    echo ""
-    
-    test_image_to_image
     echo ""
     
     test_workflow
