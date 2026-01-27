@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Determine project root
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
 cd "$PROJECT_ROOT"
 
-# Detect package manager
 if [ -f "$PROJECT_ROOT/pnpm-lock.yaml" ]; then
   PM=pnpm
   INSTALL_CMD="pnpm install --frozen-lockfile"
@@ -19,25 +16,26 @@ fi
 
 echo "Using package manager: $PM"
 
-echo "==> Install backend deps"
+echo "==> Pull latest code"
+git pull
+
+echo "==> Install backend deps (if changed)"
 cd "$PROJECT_ROOT/service"
 eval "$INSTALL_CMD"
 
 echo "==> Build backend"
 $RUN_CMD build
 
-echo "==> Install frontend deps"
+echo "==> Install frontend deps (if changed)"
 cd "$PROJECT_ROOT/frontend"
 eval "$INSTALL_CMD"
 
 echo "==> Build frontend"
 $RUN_CMD build
 
-echo "==> Start with PM2 (production env)"
+echo "==> Reload PM2 apps"
 cd "$PROJECT_ROOT"
-pm2 start ecosystem.config.js --env production
+pm2 reload ecosystem.config.js --env production
 pm2 save
 
-echo
-echo "If first time on this host, run: pm2 startup"
-echo "Deployment done. Check logs with: pm2 logs"
+echo "Update finished. Check: pm2 status"

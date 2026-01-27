@@ -1,44 +1,44 @@
-/**
- * PM2进程管理配置
- */
-
 module.exports = {
   apps: [
     {
       name: 'manga-drama-backend',
       cwd: './service',
-      script: 'dist/service/src/main.js',
-      instances: 1,
-      exec_mode: 'fork',
+      script: 'npm',
+      args: 'run start:prod',
       env: {
-        NODE_ENV: 'production',
-        PORT: 3002,
+        NODE_ENV: 'development',
+        PORT: 3001,
+        HOST: '0.0.0.0',
       },
-      error_file: './logs/backend-error.log',
+      env_production: {
+        NODE_ENV: 'production',
+        PORT: 4025,
+        HOST: '0.0.0.0',
+      },
       out_file: './logs/backend-out.log',
-      log_file: './logs/backend-combined.log',
-      time: true,
-      max_memory_restart: '500M',
-      autorestart: true,
-      watch: false,
+      error_file: './logs/backend-error.log',
+      merge_logs: true,
+      max_restarts: 5,
+      restart_delay: 5000,
     },
     {
       name: 'manga-drama-frontend',
       cwd: './frontend',
-      script: 'node_modules/.bin/vite',
-      args: 'preview --port 3003 --host',
-      instances: 1,
-      exec_mode: 'fork',
+      script: 'npm',
+      args: 'run start:prod',
       env: {
-        NODE_ENV: 'production',
+        NODE_ENV: 'development',
+        PORT: 3000,
       },
-      error_file: './logs/frontend-error.log',
+      env_production: {
+        NODE_ENV: 'production',
+        PORT: 4026,
+      },
       out_file: './logs/frontend-out.log',
-      log_file: './logs/frontend-combined.log',
-      time: true,
-      max_memory_restart: '300M',
-      autorestart: true,
-      watch: false,
+      error_file: './logs/frontend-error.log',
+      merge_logs: true,
+      max_restarts: 5,
+      restart_delay: 5000,
     },
   ],
 };
