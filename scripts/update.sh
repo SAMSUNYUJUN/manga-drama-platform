@@ -19,16 +19,16 @@ echo "Using package manager: $PM"
 echo "==> Pull latest code"
 git pull
 
-echo "==> Install backend deps (if changed)"
+echo "==> Install backend deps (ci)"
 cd "$PROJECT_ROOT/service"
 eval "$INSTALL_CMD"
 
 echo "==> Build backend"
 $RUN_CMD build
 
-echo "==> Install frontend deps (if changed)"
+echo "==> Install frontend deps (npm install to refresh lock)"
 cd "$PROJECT_ROOT/frontend"
-eval "$INSTALL_CMD"
+npm install
 
 echo "==> Build frontend"
 $RUN_CMD build

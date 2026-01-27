@@ -19,16 +19,16 @@ fi
 
 echo "Using package manager: $PM"
 
-echo "==> Install backend deps"
+echo "==> Install backend deps (ci)"
 cd "$PROJECT_ROOT/service"
 eval "$INSTALL_CMD"
 
 echo "==> Build backend"
 $RUN_CMD build
 
-echo "==> Install frontend deps"
+echo "==> Install frontend deps (npm install to refresh lock)"
 cd "$PROJECT_ROOT/frontend"
-eval "$INSTALL_CMD"
+npm install
 
 echo "==> Build frontend"
 $RUN_CMD build

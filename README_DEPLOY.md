@@ -28,6 +28,7 @@ chmod +x scripts/deploy.sh scripts/update.sh
 ```bash
 bash scripts/deploy.sh
 ```
+- 后端使用 `npm ci`，前端使用 `npm install`（需刷新 lock 文件以包含 serve 依赖）。
 - 后端监听 `0.0.0.0:4025`，前端静态服监听 `0.0.0.0:4026`。
 - 首次可执行一次 `pm2 startup`（PM2 会给出需 sudo 的命令）以开机自启。
 - 查看状态/日志：
