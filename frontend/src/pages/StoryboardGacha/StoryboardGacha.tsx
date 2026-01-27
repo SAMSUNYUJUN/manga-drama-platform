@@ -121,7 +121,7 @@ export const StoryboardGacha = () => {
           form.append(`image${idx + 1}`, file);
         }
       });
-      const res = await generateMedia(selectedShot.id, form);
+      await generateMedia(selectedShot.id, form);
       setPrompt('');
       setUploadFiles([]);
       setImageUrls('');

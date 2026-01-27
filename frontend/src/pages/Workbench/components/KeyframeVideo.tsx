@@ -33,13 +33,13 @@ type ShotEntry = {
 
 const SHOT_FILE_PREFIX = '镜头';
 
-const parseJsonSafe = async (url: string): Promise<ShotLanguageResult | null> => {
+const parseJsonSafe = async (url: string): Promise<ShotLanguageResult | undefined> => {
   try {
     const resp = await fetch(url);
     const json = await resp.json();
-    return json;
+    return json as ShotLanguageResult;
   } catch {
-    return null;
+    return undefined;
   }
 };
 
@@ -73,7 +73,7 @@ const KeyframeVideo: React.FC<KeyframeVideoProps> = ({
     setLoading(true);
     setError(null);
     try {
-      let source = shotLanguageResult;
+      let source: ShotLanguageResult | undefined | null = shotLanguageResult;
       if (!source && shotLanguagePath) {
         source = await parseJsonSafe(shotLanguagePath);
       }
