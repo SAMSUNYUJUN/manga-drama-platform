@@ -19,9 +19,10 @@ export const Dashboard = () => {
     const loadStats = async () => {
       try {
         const data = await taskService.getTaskStats();
-        setStats(data);
+        if (data) setStats(data);
       } catch (error) {
         console.error('Failed to load task stats:', error);
+        setStats({ total: 0, processing: 0, completed: 0 });
       } finally {
         setLoading(false);
       }
