@@ -114,7 +114,7 @@ export class StoryboardService {
         throw new BadRequestException('该分镜已达到 5 次生成上限，请新建分镜');
       }
 
-      const { toolId, providerType } = this.pickTool(payload.model, payload.files, payload.imageUrls);
+      const { toolId, providerType } = await this.pickTool(payload.model, payload.files, payload.imageUrls);
       normalizedUrls = this.normalizeImageUrls(providerType, payload.imageUrls);
       const tool = await this.toolRepo.findOne({ where: { id: toolId } });
       if (!tool) {
@@ -215,14 +215,30 @@ export class StoryboardService {
     return shot;
   };
 
-  private pickTool(model: string, files?: any[], imageUrls?: string[]) {
+  private async pickTool(model: string, files?: any[], imageUrls?: string[]) {
     const hasImage = (files && files.length > 0) || (imageUrls && imageUrls.length > 0);
     const key = model.toLowerCase();
-    if (key.includes('nano')) return { toolId: hasImage ? 21 : 5, providerType: 'image' as const };
-    if (key.includes('jimeng') || key.includes('极梦') || key.includes('seedream'))
-      return { toolId: hasImage ? 20 : 19, providerType: 'image' as const };
-    if (key.includes('veo')) return { toolId: hasImage ? 10 : 9, providerType: 'video' as const };
-    if (key.includes('sora')) return { toolId: hasImage ? 22 : 23, providerType: 'video' as const };
+    const pickByName = async (withImageName: string, withoutImageName: string, provider: 'image' | 'video') => {
+      const name = hasImage ? withImageName : withoutImageName;
+      const tool = await this.toolRepo.findOne({ where: { name } });
+      if (!tool) {
+        throw new BadRequestException('对应节点工具未找到');
+      }
+      return { toolId: tool.id, providerType: provider };
+    };
+
+    if (key.includes('nano')) {
+      return await pickByName('nano banana Pro文+图生图', 'nano banana Pro文生图', 'image');
+    }
+    if (key.includes('jimeng') || key.includes('极梦') || key.includes('seedream')) {
+      return await pickByName('极梦4.5文+图生图', '极梦4.5文生图', 'image');
+    }
+    if (key.includes('veo')) {
+      return await pickByName('veo3.1文+图生视频', 'veo3.1文生视频', 'video');
+    }
+    if (key.includes('sora')) {
+      return await pickByName('sora 2 Pro文+图生视频', 'sora 2 Pro文生视频', 'video');
+    }
     throw new BadRequestException('不支持的模型');
   }
 
