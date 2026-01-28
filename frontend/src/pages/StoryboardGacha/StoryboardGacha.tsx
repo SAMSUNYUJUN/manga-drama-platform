@@ -24,8 +24,8 @@ export const StoryboardGacha = () => {
   const [model, setModel] = useState(MODEL_OPTIONS[0].value);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [imageUrls, setImageUrls] = useState<string>('');
-  const [pendingShotId, setPendingShotId] = useState<number | null>(null);
-  const [pendingPrompt, setPendingPrompt] = useState<string>('');
+  type PendingState = { prompt: string; model: string; kind: 'image' | 'video' };
+  const [pendingMap, setPendingMap] = useState<Record<number, PendingState>>({});
   const [fileInputKey, setFileInputKey] = useState(0);
   const [saveSpaceId, setSaveSpaceId] = useState<number | ''>('');
 
@@ -46,8 +46,6 @@ export const StoryboardGacha = () => {
     setPrompt('');
     setUploadFiles([]);
     setImageUrls('');
-    setPendingShotId(null);
-    setPendingPrompt('');
     setFileInputKey((k) => k + 1); // reset file input
   }, [selectedShotId]);
 
@@ -102,13 +100,15 @@ export const StoryboardGacha = () => {
   const handleGenerate = async () => {
     if (!selectedShot) return;
     if (!prompt.trim()) return;
-    if (pendingShotId === selectedShot.id) return;
+    if (pendingMap[selectedShot.id]) return;
     if (messages.length >= MAX_MESSAGES_PER_SHOT) {
       alert('该分镜已达 5 次上限，请新建分镜');
       return;
     }
-    setPendingShotId(selectedShot.id);
-    setPendingPrompt(prompt.trim());
+    setPendingMap((prev) => ({
+      ...prev,
+      [selectedShot.id]: { prompt: prompt.trim(), model, kind: modelKind },
+    }));
     try {
       const form = new FormData();
       form.append('model', model);
@@ -131,8 +131,11 @@ export const StoryboardGacha = () => {
     } catch (error: any) {
       alert(error?.response?.data?.message || error?.message || '生成失败');
     } finally {
-      setPendingShotId((prev) => (prev === selectedShot.id ? null : prev));
-      setPendingPrompt('');
+      setPendingMap((prev) => {
+        const next = { ...prev };
+        delete next[selectedShot.id];
+        return next;
+      });
     }
   };
 
@@ -241,10 +244,18 @@ export const StoryboardGacha = () => {
                   </div>
                 </div>
               ))}
-              {pendingShotId === selectedShot.id && (
+              {pendingMap[selectedShot.id] && (
                 <div className={`${styles.messageItem} ${styles.pending}`}>
-                  <div className={styles.prompt}>{pendingPrompt || '等待生成...'}</div>
+                  <div className={styles.prompt}>{pendingMap[selectedShot.id].prompt || '等待生成...'}</div>
                   <div className={styles.meta}>生成中...</div>
+                  {pendingMap[selectedShot.id].kind === 'video' && (
+                    <div className={styles.progressBar}>
+                      <div className={styles.progressTrack}>
+                        <div className={styles.progressFill} />
+                      </div>
+                      <div className={styles.progressText}>视频生成中，请稍候…</div>
+                    </div>
+                  )}
                 </div>
               )}
               {!messages.length && <div className={styles.empty}>还没有生成记录</div>}
@@ -273,8 +284,8 @@ export const StoryboardGacha = () => {
               </div>
               <div className={styles.actions}>
                 <div className={styles.counter}>已生成 {messages.length}/{MAX_MESSAGES_PER_SHOT}</div>
-                <button className="btn btn--primary" disabled={pendingShotId === selectedShot?.id} onClick={handleGenerate}>
-                  {pendingShotId === selectedShot?.id ? '生成中...' : '生成'}
+                <button className="btn btn--primary" disabled={!!pendingMap[selectedShot.id]} onClick={handleGenerate}>
+                  {pendingMap[selectedShot.id] ? '生成中...' : '生成'}
                 </button>
               </div>
             </div>
